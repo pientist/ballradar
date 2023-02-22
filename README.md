@@ -1,13 +1,13 @@
-<!-- <div align="center">
+<div align="center">
 	<h1>
 		Ball Radar
 	</h1>
-</div> -->
-# Ball Radar: Ball Trajectory Inference from Multi-Agent Sports Contexts
-Source code for the paper **Ball trajectory inference from multi-agent sports contexts using set transformer and hierarchical Bi-LSTM** by Kim et al., 2023. (under review)
+</div>
+<!-- # Ball Radar -->
+Source code for the paper **Ball Trajectory Inference from Multi-Agent Sports Contexts Using Set Transformer and Hierarchical Bi-LSTM** by Kim et al., 2023. (under review)
 
 ## Introduction
-**Ball Radar** is a framework for ball trajectory inference from player trajectories in soccer matches. The main model has a hierarchical structure containing the *Ball Possessor Classifier* that intermediately predicts the player ball possession and the *Ball Trajectory Regressor* that predict the final ball trajectory conditioned on the players' ball possession probabilities. Each of the submodels deploys [Set Transformers](https://arxiv.org/abs/1810.00825) (Lee et al., 2019) to get permutation-invariant or equivariant representations of multi-agent contexts and a Bi-LSTM (or Bi-LSTMs) for sequential inference. Additionally, we perform rule-based postprocessing to make the model output more physically realistic. The following figure is an overview of the framework.<br>
+**Ball Radar** is a framework for ball trajectory inference from player trajectories in soccer matches. The main model has a hierarchical structure containing the *Ball Possessor Classifier* that predicts which player has the ball at each time step and the *Ball Trajectory Regressor* that predict the final ball trajectory conditioned on the players' possession probabilities. Each of the submodels deploys [Set Transformers](https://arxiv.org/abs/1810.00825) (Lee et al., 2019) to get permutation-invariant or equivariant representations of multi-agent contexts and a Bi-LSTM (or Bi-LSTMs) for sequential inference. Additionally, we perform rule-based postprocessing to make the model output more physically realistic. The following figure is an overview of the framework.<br>
 
 ![overview](img/overview.png)<br>
 
@@ -20,14 +20,14 @@ $ pip install -r requirements.txt
 ```
 
 ## Data Usage
-For the research, we have used the mixed dataset including the followings:
+For the research, we have used a mixed dataset including the following:
 
 - Fitogether data: 15 matches of GPS tracking data combined with the corresponding event data provided by [Fitogether](https://www.fitogether.com).
 - Metrica data: 3 matches of *publicly available* optical tracking and event data provided by [Metrica Sports](https://metrica-sports.com).
 
-Unfortunately, we cannot share the Fitogether data because it is the company's internal information, but every process can be reproduced only using Metrica data with little performance degradation. (See Table 5 of the paper.) We have attached the preprocessed version of the Metrica event data to `data/metrica_events/` (event data) and uploaded that of the Metrica tracking data to my [Google Drive](https://drive.google.com/drive/u/1/folders/1xFSHaaIcyyuNplUUF4da9KVOFPiAIO6B). To execute the code, you should download the tracking data files from the Google Drive and locate them in `data/metrica_traces/`.
+Unfortunately, we cannot share the Fitogether data because it is the company's internal information, but every process can be reproduced only using Metrica data with little performance degradation. (See Table 5 of the paper.) We have attached the preprocessed version of the Metrica event data to `data/metrica_events/` and uploaded that of the Metrica tracking data to my [Google Drive](https://drive.google.com/drive/u/1/folders/1xFSHaaIcyyuNplUUF4da9KVOFPiAIO6B). To execute the code, you should download the tracking data files from the drive and locate them in `data/metrica_traces/`.
 
-For your reference, we have also attached the preprocessing code in `datatools/metrica_data_processing.ipynb`. That is, you can regenerate the preprocessed data files on your own by downloading the raw Metrica data from the [original repository](https://github.com/metrica-sports/sample-data), locating the CSV files in `data/metrica_traces/Sample_Game_X` for each game, and running `datatools/metrica_data_processing.ipynb`.
+For your reference, we have also attached the preprocessing code in `datatools/metrica_data_processing.ipynb`. That is, you can regenerate the preprocessed data files on your own by downloading the raw Metrica data from the [original repository](https://github.com/metrica-sports/sample-data), locating the CSV files in `data/metrica_traces/Sample_Game_X` for each game, and executing `datatools/metrica_data_processing.ipynb`.
 
 ## Running the Code
 To train the model, you can run `scripts/player_ball.sh` using the following command on the terminal:
@@ -39,11 +39,11 @@ Also, you can train the other models that we introduced in Section 4.2 of the pa
 To evaluate the model performance, please run `model_eval.ipynb` which can reproduce the results of Section 4.4 and Section 4.5.
 
 ## Animating Match Scenes
-For interpretability, we have implemented a tool named `TraceAnimator` for dynamically visualizing scenes using tracking data in soccer matches. It animates multiple types of trajectories, including true player and ball trajectories and the virtual trajectories predicted by multiple models at the same time. We have attached a sample 5-minute animation (`img/metrica_match2_00.00-05.00.mp4`) resulting from applying our model to a match data including:
+For interpretability, we have implemented a tool named `TraceAnimator` for dynamically visualizing scenes using tracking data in soccer matches. It animates multiple types of trajectories, including true player and ball trajectories and the virtual trajectories predicted by multiple models at the same time. We have attached a sample 5-minute animation (`img/metrica_match2_00.00-05.00.mp4`) resulting from applying our model to a match including:
 
 - player trajectories (red and blue circles with numbers inside)
 - true ball trajectory (white circle)
 - output of the ball trajectory regressor (orange star)
 - predicted ball trajectory after the postprocessing (green star)
 
-You can simply import the class `TraceAnimator` in `datatools/trace_animator.py`, making a class object, and execute the method `run()`. Please refer to `model_eval.ipynb` for the usege of this tool.
+You can simply import the class `TraceAnimator` in `datatools/trace_animator.py`, make a class object, and execute the method `run()`. Please refer to `model_eval.ipynb` for the usage of this tool.
