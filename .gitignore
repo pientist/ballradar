@@ -1,12 +1,13 @@
 # Experimental data and code files
-data/
+data/gps_event_traces
+data/gps_event_traces_gk_pred
+data/metrica_traces/Sample_Game_*
 saved/
 animations/
 private_*/
 *.zip
 *.gp
 *.im
-*.csv
 *.npy
 *.pkl
 *.gif
