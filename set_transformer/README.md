@@ -1,4 +1,5 @@
 # Set Transformer in `pytorch`
+(Original repository: https://github.com/TropComplique/set-transformer)<br>
 This an implementation of [Set Transformer: A Framework for Attention-based Permutation-Invariant Neural Networks](https://arxiv.org/abs/1810.00825).
 
 ## How to use this code
