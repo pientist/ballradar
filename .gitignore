@@ -1,7 +1,7 @@
 # Experimental data and code files
 data/gps_event_traces
 data/gps_event_traces_gk_pred
-data/metrica_traces/Sample_Game_*
+data/metrica_traces/
 saved/
 animations/
 private_*/

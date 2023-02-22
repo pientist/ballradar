@@ -20,6 +20,8 @@ from models.utils import (
     num_trainable_params,
 )
 
+# Modified from https://github.com/ezhan94/multiagent-programmatic-supervision/blob/master/train.py
+
 
 # Helper functions
 def printlog(line):

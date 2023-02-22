@@ -8,6 +8,8 @@ from matplotlib.patches import Arc
 from matplotlib.pyplot import cm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+# Modified from https://github.com/TomDecroos/matplotsoccer/blob/master/matplotsoccer/fns.py
+
 spadl_config = {
     "length": 108,
     "width": 72,

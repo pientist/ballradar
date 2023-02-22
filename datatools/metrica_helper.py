@@ -1,11 +1,10 @@
 import math
 import os
 import sys
+from datetime import timedelta
 
 if not os.getcwd() in sys.path:
     sys.path.append(os.getcwd())
-
-from datetime import timedelta
 
 import numpy as np
 import pandas as pd
