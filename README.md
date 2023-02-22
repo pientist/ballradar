@@ -25,7 +25,7 @@ For the research, we have used the mixed dataset including the followings:
 - Fitogether data: 15 matches of GPS tracking data combined with the corresponding event data provided by [Fitogether](https://www.fitogether.com).
 - Metrica data: 3 matches of *publicly available* optical tracking and event data provided by [Metrica Sports](https://metrica-sports.com).
 
-Unfortunately, we cannot share the Fitogether data because it is the company's internal information, but every process can be reproduced only using Metrica data with little performance degradation. (See Table 5 of the paper.) We have uploaded the preprocessed Metrica data in `data/metrica_traces/` (tracking data) and `data/metrica_events/` (event data).
+Unfortunately, we cannot share the Fitogether data because it is the company's internal information, but every process can be reproduced only using Metrica data with little performance degradation. (See Table 5 of the paper.) We have attached the preprocessed version of the Metrica event data to `data/metrica_events/` (event data) and uploaded that of the Metrica tracking data to my [Google Drive](https://drive.google.com/drive/u/1/folders/1xFSHaaIcyyuNplUUF4da9KVOFPiAIO6B). To execute the code, you should download the tracking data files from the Google Drive and locate them in `data/metrica_traces/`.
 
 For your reference, we have also attached the preprocessing code in `datatools/metrica_data_processing.ipynb`. That is, you can regenerate the preprocessed data files on your own by downloading the raw Metrica data from the [original repository](https://github.com/metrica-sports/sample-data), locating the CSV files in `data/metrica_traces/Sample_Game_X` for each game, and running `datatools/metrica_data_processing.ipynb`.
 
