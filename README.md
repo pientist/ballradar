@@ -4,6 +4,7 @@
 	</h1>
 </div>
 <!-- # Ball Radar -->
+
 Source code for the paper **Ball Trajectory Inference from Multi-Agent Sports Contexts Using Set Transformer and Hierarchical Bi-LSTM** by Kim et al., 2023. (under review)
 
 ## Introduction

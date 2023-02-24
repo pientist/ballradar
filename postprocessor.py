@@ -72,19 +72,18 @@ class Postprocessor:
         poss_changes = carriers.notna().astype(int).diff().fillna(0)
         start_idxs = poss_changes[poss_changes > 0].index.values.tolist()
         end_idxs = poss_changes[poss_changes < 0].index.values.tolist()
-
         if not start_idxs:
-            carry_records = [[carriers.index[0], carriers.index[-1], carriers.iloc[0]]]
-            carry_records = pd.DataFrame(carry_records, columns=["start_idx", "end_idx", "carrier"])
+            start_idxs = [carriers.index[0]]
+        if not end_idxs:
+            end_idxs = [carriers.index[-1]]
 
-        else:
-            if start_idxs[0] > end_idxs[0]:
-                start_idxs.insert(0, carriers.index[0])
-            if start_idxs[-1] > end_idxs[-1]:
-                end_idxs.append(carriers.index[-1])
+        if start_idxs[0] > end_idxs[0]:
+            start_idxs.insert(0, carriers.index[0])
+        if start_idxs[-1] > end_idxs[-1]:
+            end_idxs.append(carriers.index[-1])
 
-            carry_records = pd.DataFrame(np.stack([start_idxs, end_idxs], axis=1), columns=["start_idx", "end_idx"])
-            carry_records["carrier"] = carriers.loc[start_idxs].values.tolist()
+        carry_records = pd.DataFrame(np.stack([start_idxs, end_idxs], axis=1), columns=["start_idx", "end_idx"])
+        carry_records["carrier"] = carriers.loc[start_idxs].values.tolist()
 
         return carry_records
 
@@ -104,6 +103,16 @@ class Postprocessor:
         min_flags = (accels["accel"] == accels.min(axis=1)) & (accels["accel"] < -thres_accel)
         max_idxs = accels[max_flags].index.tolist()
         min_idxs = accels[min_flags].index.tolist()
+
+        if traces.index[0] in max_idxs:
+            max_idxs.pop(0)
+        if traces.index[-1] in min_idxs:
+            min_idxs.pop(-1)
+
+        if not min_idxs:
+            min_idxs.insert(0, traces.index[0])
+        if not max_idxs:
+            max_idxs.append(traces.index[-1])
 
         if min_idxs[0] > max_idxs[0]:
             min_idxs.insert(0, traces.index[0])
@@ -206,6 +215,8 @@ class Postprocessor:
         return output
 
     def run(self, method="ball_accel", thres_accel=5, thres_touch=0.2, thres_carry=0.5, evaluate=False):
+        self.output[["ball_x", "ball_y"]] = self.output[["ball_x", "ball_y"]].astype(float)
+
         if evaluate:
             n_frames = 0
             sum_macro_acc = 0
@@ -237,11 +248,16 @@ class Postprocessor:
                     self.output.loc[ep_traces.index] = ep_output
 
                     if evaluate:
+                        n_frames += ep_traces.shape[0]
+
+                        ep_target_poss = ep_traces["event_player"].fillna(method="bfill").fillna(method="ffill")
+                        ep_output_poss = ep_output["carrier"].fillna(method="bfill").fillna(method="ffill")
+                        sum_macro_acc += (ep_target_poss == ep_output_poss).astype(int).sum()
+
                         ep_target_traces = self.target_traces.loc[ep_traces.index]
                         error_x = (ep_output["ball_x"] - ep_target_traces["ball_x"]).values
                         error_y = (ep_output["ball_y"] - ep_target_traces["ball_y"]).values
                         sum_micro_pos_errors += np.sqrt((error_x**2 + error_y**2).astype(float)).sum()
-                        n_frames += ep_traces.shape[0]
 
                 self.output.loc[phase_traces.index, ["ball_x", "ball_y"]] = self.output.loc[
                     phase_traces.index, ["ball_x", "ball_y"]
