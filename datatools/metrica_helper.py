@@ -322,6 +322,69 @@ class MetricaHelper(TraceHelper):
         self.find_gt_player_poss()
         return super().find_gt_team_poss(player_poss_col="player_poss")
 
+    @staticmethod
+    def find_nearest_player(snapshot, players, team_code=None):
+        if team_code is None:
+            x_cols = [f"{p}_x" for p in players]
+            y_cols = [f"{p}_y" for p in players]
+        else:
+            x_cols = [f"{p}_x" for p in players if p[0] == team_code]
+            y_cols = [f"{p}_y" for p in players if p[0] == team_code]
+
+        ball_dists_x = (snapshot[x_cols] - snapshot["ball_x"]).astype(float).values
+        ball_dists_y = (snapshot[y_cols] - snapshot["ball_y"]).astype(float).values
+
+        if team_code is None:
+            ball_dists = pd.Series(np.sqrt(ball_dists_x**2 + ball_dists_y**2), index=players)
+        else:
+            team_players = [p for p in players if p[0] == team_code]
+            ball_dists = pd.Series(np.sqrt(ball_dists_x**2 + ball_dists_y**2), index=team_players)
+
+        return ball_dists.idxmin()
+
+    def correct_event_player_ids(self):
+        print("\nCorrecting event player IDs:")
+        players = self.team1_players + self.team2_players
+        player_x_cols = [f"{p}_x" for p in players]
+        valid_types = ["BALL LOST", "BALL OUT", "CHALLENGE", "PASS", "RECOVERY", "SET PIECE", "SHOT"]
+
+        for phase in self.events["phase"].unique():
+            phase_events = self.events[self.events["phase"] == phase]
+            phase_traces = self.traces[self.traces["phase"] == phase]
+            phase_players = [c[:-2] for c in phase_traces[player_x_cols].dropna(axis=1).columns]
+
+            switch_counts = pd.DataFrame(0, index=players, columns=players)
+            for i in tqdm(phase_events.index, desc=f"Phase {phase}"):
+                event_type = phase_events.at[i, "type"]
+                event_subtype = phase_events.at[i, "subtype"]
+
+                if event_type in valid_types:
+                    if event_type == "BALL LOST" and event_subtype == "THEFT":
+                        continue
+                    if event_type == "CHALLENGE" and not event_subtype.endswith("-WON"):
+                        continue
+
+                    start_frame = phase_events.at[i, "start_frame"]
+                    end_frame = phase_events.at[i, "end_frame"]
+
+                    recorded_p_from = phase_events.at[i, "from"]
+                    detected_p_from = MetricaHelper.find_nearest_player(
+                        phase_traces.loc[start_frame - 1], phase_players, recorded_p_from[0]
+                    )
+                    switch_counts.at[recorded_p_from, detected_p_from] += 1
+
+                    if event_type == "PASS":
+                        recorded_p_to = phase_events.at[i, "to"]
+                        detected_p_to = MetricaHelper.find_nearest_player(
+                            phase_traces.loc[end_frame - 1], phase_players, recorded_p_to[0]
+                        )
+                        switch_counts.at[recorded_p_to, detected_p_to] += 1
+
+            switch_dict = switch_counts[switch_counts.sum(axis=1) > 0].idxmax(axis=1).to_dict()
+            self.traces.loc[phase_traces.index, "event_player"] = phase_traces["event_player"].map(switch_dict)
+            self.events.loc[phase_events.index, "from"] = phase_events["from"].map(switch_dict)
+            self.events.loc[phase_events.index, "to"] = phase_events["to"].map(switch_dict)
+
     def generate_pass_records(self, frames: pd.Series = None):
         events = self.events[self.events["start_frame"].isin(frames)] if frames is not None else self.events
 
