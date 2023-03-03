@@ -91,12 +91,15 @@ class TraceHelper:
         return team_poss.replace({0: np.nan, 1: "A", 2: "B"})
 
     def find_gt_team_poss(self, player_poss_col="event_player"):
-        self.traces["team_poss"] = np.nan
-        team_poss = self.traces[player_poss_col].fillna("T").apply(lambda x: x[0]).replace({"T": 0, "A": 1, "B": 2})
-        poss_ids = (team_poss.diff().fillna(0) * team_poss).cumsum()
-        team_poss = team_poss.groupby(poss_ids, group_keys=True).apply(TraceHelper.ffill_transition)
-        team_poss = team_poss.reset_index(level=0, drop=True)
-        self.traces["team_poss"] = team_poss.fillna(method="bfill").fillna(method="ffill")
+        self.traces["team_poss"] = self.traces[player_poss_col].fillna(method="ffill").fillna(method="bfill")
+        self.traces["team_poss"] = self.traces["team_poss"].apply(lambda x: x[0])
+
+        # team_poss_dict = {"T": np.nan, "O": 0, "A": 1, "B": 2}
+        # team_poss = self.traces[player_poss_col].fillna("T").apply(lambda x: x[0]).map(team_poss_dict)
+        # poss_ids = (team_poss.diff().fillna(0) * team_poss).cumsum()
+        # team_poss = team_poss.groupby(poss_ids, group_keys=True).apply(TraceHelper.ffill_transition)
+        # team_poss = team_poss.reset_index(level=0, drop=True)
+        # self.traces["team_poss"] = team_poss.fillna(method="bfill").fillna(method="ffill")
 
     def estimate_naive_team_poss(self):
         xy_cols = [f"{p}{t}" for p in self.team1_players + self.team2_players for t in ["_x", "_y"]]

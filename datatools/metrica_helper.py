@@ -252,70 +252,59 @@ class MetricaHelper(TraceHelper):
                 self.traces.loc[episode_idxs, "episode"] = episode
 
     def find_gt_player_poss(self):
+        self.traces["player_poss"] = np.nan
         if "frame" in self.traces.columns:
             self.traces.set_index("frame", inplace=True)
 
-        self.traces["player_poss"] = np.nan
-        events = self.events[self.events["type"] != "CARRY"].copy()
-        prev_frame = 0
-        prev_poss = None
+        events = self.events[
+            ~(self.events["type"].isin(["CARRY", "CARD", "SET PIECE"]))
+            & ~((self.events["type"] == "BALL LOST") & (self.events["subtype"] == "THEFT"))
+            & ~((self.events["type"] == "CHALLENGE") & (self.events["subtype"].str.endswith("-LOST")))
+        ].copy()
 
-        for i in tqdm(events.index, desc="Estimating player possessions"):
-            start_frame = events.at[i, "start_frame"]
-            end_frame = events.at[i, "end_frame"]
+        type_order = ["BALL LOST", "CHALLENGE", "RECOVERY", "FAULT RECEIVED", "PASS", "SHOT", "BALL OUT"]
+        events["type"] = pd.Categorical(events["type"], categories=type_order)
+        events.sort_values(["start_time", "type"], inplace=True)
+
+        out_frame = 0
+
+        for i in events.index:
             event_type = events.at[i, "type"]
             event_subtype = events.at[i, "subtype"]
-            player_from = events.at[i, "from"]
-            player_to = events.at[i, "to"]
+            start_frame = events.at[i, "start_frame"]
+            end_frame = events.at[i, "end_frame"]
 
-            if event_type in ["SET PIECE", "RECOVERY", "BALL OUT", "SHOT"]:
-                self.traces.at[start_frame, "player_poss"] = player_from
-                if prev_frame > 0:
-                    prev_poss = self.traces.at[prev_frame, "player_poss"]
-                    self.traces.loc[prev_frame:start_frame, "player_poss"] = prev_poss
-                prev_frame = start_frame if event_type in ["SET PIECE", "RECOVERY"] else end_frame + 1
+            if start_frame > out_frame + 20:
+                self.traces.at[start_frame, "player_poss"] = events.at[i, "from"]
+                if event_type == "PASS":
+                    self.traces.at[end_frame, "player_poss"] = events.at[i, "to"]
 
-            elif event_type == "BALL LOST":
-                if event_subtype == "END HALF":
-                    self.traces.at[start_frame, "player_poss"] = player_from
-                    if prev_frame > 0:
-                        prev_poss = self.traces.at[prev_frame, "player_poss"]
-                        self.traces.loc[prev_frame:start_frame, "player_poss"] = prev_poss
-                    prev_frame = start_frame
+                if event_type == "BALL OUT" or event_subtype.endswith("-OUT") or event_subtype.endswith("-GOAL"):
+                    out_x = events.at[i, "end_x"]
+                    out_y = events.at[i, "end_y"]
+                    if out_x < 0:
+                        out_label = "GOAL-L" if event_subtype.endswith("-GOAL") else "OUT-L"
+                    elif out_x > 1:
+                        out_label = "GOAL-R" if event_subtype.endswith("-GOAL") else "OUT-R"
+                    elif out_y < 0:
+                        out_label = "OUT-B"
+                    elif out_y > 1:
+                        out_label = "OUT-T"
+                    else:
+                        continue
 
-                elif event_subtype != "THEFT":
-                    self.traces.at[start_frame, "player_poss"] = player_from
-                    if prev_frame > 0:
-                        prev_poss = self.traces.at[prev_frame, "player_poss"]
-                        self.traces.loc[prev_frame:start_frame, "player_poss"] = prev_poss
-                    prev_frame = end_frame + 1
+                    out_frame = end_frame
+                    if i == events.index[-1]:
+                        self.traces.loc[out_frame:, "player_poss"] = out_label
+                    else:
+                        i_next = events[events["start_frame"] > out_frame + 20].index[0]
+                        next_frame = self.events.at[i_next, "start_frame"]
+                        self.traces.loc[out_frame : next_frame - 21, "player_poss"] = out_label
+                        self.traces.loc[next_frame - 20 : next_frame, "player_poss"] = self.events.at[i_next, "from"]
 
-            elif event_type == "CHALLENGE":
-                valid_subtypes = [
-                    "AERIAL-WON",
-                    "GROUND-WON",
-                    "TACKLE-WON",
-                    "AERIAL-FAULT-WON",
-                    "GROUND-FAULT-WON",
-                    "DRIBBLE-WON",
-                    "TACKLE-FAULT-WON",
-                    "TACKLE-ADVANTAGE-WON",
-                ]
-                if event_subtype in valid_subtypes:
-                    self.traces.at[start_frame, "player_poss"] = player_from
-                    if prev_frame > 0:
-                        prev_poss = self.traces.at[prev_frame, "player_poss"]
-                        self.traces.loc[prev_frame:start_frame, "player_poss"] = prev_poss
-                    prev_frame = start_frame
-
-            elif event_type == "PASS":
-                self.traces.at[start_frame, "player_poss"] = player_from
-                self.traces.at[end_frame, "player_poss"] = player_to
-                if prev_frame > 0:
-                    prev_poss = self.traces.at[prev_frame, "player_poss"]
-                    self.traces.loc[prev_frame:start_frame, "player_poss"] = prev_poss
-                prev_frame = end_frame
-
+        poss_prev = self.traces["player_poss"].fillna(method="ffill")
+        poss_next = self.traces["player_poss"].fillna(method="bfill")
+        self.traces["player_poss"] = poss_prev.where(poss_prev == poss_next, np.nan)
         self.traces.reset_index(inplace=True)
 
     def find_gt_team_poss(self):
