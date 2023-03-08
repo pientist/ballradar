@@ -370,9 +370,10 @@ class MetricaHelper(TraceHelper):
                         switch_counts.at[recorded_p_to, detected_p_to] += 1
 
             switch_dict = switch_counts[switch_counts.sum(axis=1) > 0].idxmax(axis=1).to_dict()
-            self.traces.loc[phase_traces.index, "event_player"] = phase_traces["event_player"].map(switch_dict)
             self.events.loc[phase_events.index, "from"] = phase_events["from"].map(switch_dict)
             self.events.loc[phase_events.index, "to"] = phase_events["to"].map(switch_dict)
+            self.traces.loc[phase_traces.index, "event_player"] = phase_traces["event_player"].map(switch_dict)
+            self.traces.loc[phase_traces.index, "player_poss"] = phase_traces["player_poss"].map(switch_dict)
 
     def generate_pass_records(self, frames: pd.Series = None):
         events = self.events[self.events["start_frame"].isin(frames)] if frames is not None else self.events
