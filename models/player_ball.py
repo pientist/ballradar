@@ -12,11 +12,11 @@ class PlayerBall(nn.Module):
 
         self.model_args = [
             "n_players",
-            "macro_embed_dim",
+            "macro_pe_dim",
+            "macro_pi_dim",
             "macro_rnn_dim",
-            "micro_embed_dim",
+            "micro_pi_dim",
             "micro_rnn_dim",
-            "n_layers",
             "dropout",
         ]
         self.params = parse_model_params(self.model_args, params, parser)
@@ -30,47 +30,48 @@ class PlayerBall(nn.Module):
         self.n_components = self.n_players * 2 + 4  # number of total players + 4 outside labels (26 in general)
         self.x_dim = params["n_features"]  # number of features per player (6 in general)
 
-        self.macro_z_dim = params["macro_embed_dim"]
-        self.macro_h_dim = params["macro_rnn_dim"]
-        self.micro_z_dim = params["micro_embed_dim"]
-        self.micro_h_dim = params["micro_rnn_dim"]
-        self.micro_dim = 2
+        self.macro_pe_dim = params["macro_pe_dim"]
+        self.macro_pi_dim = params["macro_pi_dim"]
+        self.macro_rnn_dim = params["macro_rnn_dim"]
+        self.micro_pi_dim = params["micro_pi_dim"]
+        self.micro_rnn_dim = params["micro_rnn_dim"]
+        self.micro_out_dim = 2
+        self.n_layers = 2
 
-        self.n_layers = params["n_layers"]
         dropout = params["dropout"] if "dropout" in params else 0
 
-        self.macro_team1_st = SetTransformer(self.x_dim + 1, self.macro_z_dim, embed_type="e")
-        self.macro_team2_st = SetTransformer(self.x_dim + 1, self.macro_z_dim, embed_type="e")
-        self.macro_outside_fc = nn.Linear(self.x_dim + 1, self.macro_z_dim)
+        self.macro_team1_st = SetTransformer(self.x_dim + 1, self.macro_pe_dim, embed_type="e")
+        self.macro_team2_st = SetTransformer(self.x_dim + 1, self.macro_pe_dim, embed_type="e")
+        self.macro_outside_fc = nn.Linear(self.x_dim + 1, self.macro_pe_dim)
 
-        self.fpi_st = SetTransformer(self.x_dim + 1, self.macro_z_dim, embed_type="i")
-        self.fpe_st = SetTransformer(self.x_dim + 1, self.macro_z_dim, embed_type="e")
+        self.fpe_st = SetTransformer(self.x_dim + 1, self.macro_pi_dim, embed_type="e")
+        self.fpi_st = SetTransformer(self.x_dim + 1, self.macro_pe_dim, embed_type="i")
 
         self.macro_rnn = nn.LSTM(
-            input_size=self.x_dim + 1 + self.macro_z_dim * 3,
-            hidden_size=self.macro_h_dim,
+            input_size=self.x_dim + 1 + self.macro_pe_dim * 2 + self.macro_pi_dim,
+            hidden_size=self.macro_rnn_dim,
             num_layers=self.n_layers,
             dropout=dropout,
             bidirectional=params["bidirectional"],
         )
-        self.macro_fc = nn.Sequential(nn.Linear(self.macro_h_dim * 2, 2), nn.Dropout(0), nn.GLU())
+        self.macro_fc = nn.Sequential(nn.Linear(self.macro_rnn_dim * 2, 2), nn.Dropout(0), nn.GLU())
 
-        self.micro_team1_st = SetTransformer(self.x_dim + self.macro_h_dim * 2 + 1, self.micro_z_dim, embed_type="i")
-        self.micro_team2_st = SetTransformer(self.x_dim + self.macro_h_dim * 2 + 1, self.micro_z_dim, embed_type="i")
+        self.micro_team1_st = SetTransformer(self.x_dim + self.macro_rnn_dim * 2 + 1, self.micro_pi_dim, embed_type="i")
+        self.micro_team2_st = SetTransformer(self.x_dim + self.macro_rnn_dim * 2 + 1, self.micro_pi_dim, embed_type="i")
         self.micro_outside_fc = nn.Sequential(
-            nn.Linear((self.x_dim + self.macro_h_dim * 2 + 1) * 4, self.micro_z_dim), nn.ReLU()
+            nn.Linear((self.x_dim + self.macro_rnn_dim * 2 + 1) * 4, self.micro_pi_dim), nn.ReLU()
         )
-        self.micro_embed_fc = nn.Sequential(nn.Linear(self.micro_z_dim * 3, self.micro_z_dim), nn.ReLU())
+        self.micro_embed_fc = nn.Sequential(nn.Linear(self.micro_pi_dim * 3, self.micro_pi_dim), nn.ReLU())
 
         self.micro_rnn = nn.LSTM(
-            input_size=self.micro_z_dim + self.micro_dim,
-            hidden_size=self.micro_h_dim,
+            input_size=self.micro_pi_dim + self.micro_out_dim,
+            hidden_size=self.micro_rnn_dim,
             num_layers=self.n_layers,
             dropout=dropout,
             bidirectional=params["bidirectional"],
         )
-        micro_fc_input_dim = self.micro_h_dim * 2 if params["bidirectional"] else self.micro_h_dim
-        self.micro_fc = nn.Sequential(nn.Linear(micro_fc_input_dim, self.micro_dim * 2), nn.GLU())
+        micro_fc_input_dim = self.micro_rnn_dim * 2 if params["bidirectional"] else self.micro_rnn_dim
+        self.micro_fc = nn.Sequential(nn.Linear(micro_fc_input_dim, self.micro_out_dim * 2), nn.GLU())
 
     def forward(
         self,
@@ -104,7 +105,7 @@ class PlayerBall(nn.Module):
         if micro_target is not None:
             masked_micro_target = micro_target.transpose(0, 1) * random_mask
         else:
-            masked_micro_target = torch.zeros(seq_len, batch_size, self.micro_dim).to(input.device)
+            masked_micro_target = torch.zeros(seq_len, batch_size, self.micro_out_dim).to(input.device)
 
         team1_x = input[:, :, : (self.x_dim * n_players)].reshape(seq_len, batch_size, n_players, -1)
         team1_x = team1_x.reshape(seq_len * batch_size, n_players, self.x_dim)  # [time * bs, player, x]
@@ -118,27 +119,27 @@ class PlayerBall(nn.Module):
         outside_x = outside_x.reshape(seq_len * batch_size, 4, self.x_dim)  # [time * bs, 4, x]
         outside_x_expanded = torch.cat([outside_x, masked_macro_target[:, -4:]], -1)  # [time * bs, 4, x + 1]
 
-        team1_z = self.macro_team1_st(team1_x_expanded)  # [time * bs, player, macro_z]
-        team2_z = self.macro_team2_st(team2_x_expanded)  # [time * bs, player, macro_z]
-        outsize_z = self.macro_outside_fc(outside_x_expanded)  # [time * bs, 4, macro_z]
-        ppe_z = torch.cat([team1_z, team2_z, outsize_z], dim=1)  # [time * bs, comp, macro_z]
+        team1_z = self.macro_team1_st(team1_x_expanded)  # [time * bs, player, macro_pe]
+        team2_z = self.macro_team2_st(team2_x_expanded)  # [time * bs, player, macro_pe]
+        outsize_z = self.macro_outside_fc(outside_x_expanded)  # [time * bs, 4, macro_pe]
+        ppe_z = torch.cat([team1_z, team2_z, outsize_z], dim=1)  # [time * bs, comp, macro_pe]
 
         x = torch.cat([team1_x_expanded, team2_x_expanded, outside_x_expanded], 1)  # [time * bs, comp, x + 1]
-        fpe_z = self.fpe_st(x)  # [time * bs, comp, macro_z]
-        fpi_z = self.fpi_st(x).unsqueeze(1).expand(-1, self.n_components, -1)  # [time * bs, comp, macro_z]
+        fpe_z = self.fpe_st(x)  # [time * bs, comp, macro_pe]
+        fpi_z = self.fpi_st(x).unsqueeze(1).expand(-1, self.n_components, -1)  # [time * bs, comp, macro_pi]
 
         macro_rnn_input = torch.cat([x, ppe_z, fpe_z, fpi_z], -1).reshape(seq_len, batch_size * self.n_components, -1)
-        macro_h, _ = self.macro_rnn(macro_rnn_input)  # [time, bs * comp, macro_h * 2]
+        macro_h, _ = self.macro_rnn(macro_rnn_input)  # [time, bs * comp, macro_rnn * 2]
 
-        macro_h = macro_h.reshape(seq_len * batch_size, self.n_components, -1)  # [time * bs, comp, macro_h * 2]
+        macro_h = macro_h.reshape(seq_len * batch_size, self.n_components, -1)  # [time * bs, comp, macro_rnn * 2]
         macro_out = self.macro_fc(macro_h)  # [time * bs, comp, 1]
 
         team1_st_input = torch.cat([team1_x, macro_h[:, :n_players], macro_out[:, :n_players]], -1)
         team2_st_input = torch.cat([team2_x, macro_h[:, n_players:-4], macro_out[:, n_players:-4]], -1)
         outside_fc_input = torch.cat([outside_x, macro_h[:, -4:], macro_out[:, -4:]], -1)
         outside_fc_input = outside_fc_input.reshape(seq_len * batch_size, -1)
-        # team_st_input: [time * bs, player, x + macro_h * 2 + 1]
-        # outside_fc_input: [time * bs, (x + macro_h * 2 + 1) * 4]
+        # team_st_input: [time * bs, player, x + macro_rnn * 2 + 1]
+        # outside_fc_input: [time * bs, (x + macro_rnn * 2 + 1) * 4]
 
         micro_team1_z = self.micro_team1_st(team1_st_input)  # [time, bs, micro_z]
         micro_team2_z = self.micro_team2_st(team2_st_input)  # [time, bs, micro_z]
@@ -148,7 +149,7 @@ class PlayerBall(nn.Module):
         micro_z = self.micro_embed_fc(micro_z).reshape(seq_len, batch_size, -1)  # [time, bs, micro_z]
 
         micro_rnn_input = torch.cat([micro_z, masked_micro_target], dim=-1)  # [time, bs, micro_z + micro]
-        micro_h, _ = self.micro_rnn(micro_rnn_input)  # [time, bs, micro_h * 2]
+        micro_h, _ = self.micro_rnn(micro_rnn_input)  # [time, bs, micro_rnn * 2]
         micro_out = self.micro_fc(micro_h).transpose(0, 1)  # [bs, time, micro]
 
         macro_out = macro_out.squeeze(-1).reshape(seq_len, batch_size, -1).transpose(0, 1)  # [bs, time, comp]

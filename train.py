@@ -186,7 +186,6 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
 parser = argparse.ArgumentParser()
 
 parser.add_argument("-t", "--trial", type=int, required=True)
-parser.add_argument("--dataset", type=str, required=False, default="soccer")
 parser.add_argument("--model", type=str, required=True, default="player_ball")
 parser.add_argument("--macro_type", type=str, required=False, default="team_poss", help="type of macro-intents")
 parser.add_argument("--target_type", type=str, required=False, default="ball", help="gk, ball, or team_poss")
@@ -196,6 +195,11 @@ parser.add_argument("--speed_loss", action="store_true", default=False, help="in
 parser.add_argument("--masking", type=float, required=False, default=1, help="masking proportion of the target")
 parser.add_argument("--prev_out_aware", action="store_true", default=False, help="make RNN refer to previous outputs")
 parser.add_argument("--bidirectional", action="store_true", default=False, help="make RNN bidirectional")
+
+parser.add_argument("--train_fito", action="store_true", default=False, help="Use Fitogether data for training")
+parser.add_argument("--valid_fito", action="store_true", default=False, help="Use Fitogether data for validation")
+parser.add_argument("--train_metrica", action="store_true", default=False, help="Use Metrica data for training")
+parser.add_argument("--valid_metrica", action="store_true", default=False, help="Use Metrica data for validation")
 parser.add_argument("--flip_pitch", action="store_true", default=False, help="augment data by flipping the pitch")
 parser.add_argument("--n_features", type=int, required=False, default=2, help="num features")
 
@@ -212,11 +216,6 @@ parser.add_argument("--cuda", action="store_true", default=False, help="use GPU"
 parser.add_argument("--cont", action="store_true", default=False, help="continue training previous best model")
 parser.add_argument("--best_loss", type=float, required=False, default=0, help="best test loss")
 
-parser.add_argument("--type_aware", action="store_true", default=False, help="use node and edge types in GVRNN")
-parser.add_argument("--pred_delta", action="store_true", default=False, help="predict delta x instead of x itself")
-parser.add_argument("--fix_dec_std", action="store_true", default=False, help="use a fixed std for the decoder")
-parser.add_argument("--normalize", action="store_true", default=True, help="normalize data")
-
 args, _ = parser.parse_known_args()
 
 
@@ -226,7 +225,6 @@ if __name__ == "__main__":
 
     # Parameters to save
     params = {
-        "dataset": args.dataset,
         "model": args.model,
         "macro_type": args.macro_type,
         "target_type": args.target_type,
@@ -244,10 +242,6 @@ if __name__ == "__main__":
         "seed": args.seed,
         "cuda": args.cuda,
         "best_loss": args.best_loss,
-        "type_aware": args.type_aware,
-        "pred_delta": args.pred_delta,
-        "fix_dec_std": args.fix_dec_std,
-        "normalize": args.normalize,
     }
 
     # Hyperparameters
@@ -327,8 +321,19 @@ if __name__ == "__main__":
         gps_paths = [f"data/gps_event_traces_gk_pred/{f}" for f in gps_files]
         gps_paths.sort()
 
-        train_paths = gps_paths[:10]  # metrica_paths[:-1] +
-        valid_paths = gps_paths[-5:-3]  # metrica_paths[-1:] + gps_paths[-10:-5]
+        assert args.train_fito or args.train_metrica
+        train_paths = []
+        if args.train_fito:
+            train_paths += gps_paths[:10]
+        if args.train_metrica:
+            train_paths += metrica_paths[:-1]
+
+        assert args.valid_fito or args.valid_metrica
+        valid_paths = []
+        if args.valid_fito:
+            valid_paths += gps_paths[-5:-3]
+        if args.valid_metrica:
+            valid_paths += metrica_paths[-1:]
 
     macro_type = args.macro_type if args.model in ["team_ball", "player_ball"] else None
     nw = len(model.device_ids) * 4
@@ -354,7 +359,8 @@ if __name__ == "__main__":
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, num_workers=nw, pin_memory=True)
 
     # Train loop
-    best_test_loss = args.best_loss
+    best_sum_loss = args.best_loss
+    best_mse_loss = 0
     epochs_since_best = 0
     lr = max(args.start_lr, args.min_lr)
 
@@ -393,19 +399,25 @@ if __name__ == "__main__":
         epoch_time = time.time() - start_time
         printlog("Time:\t {:.2f}s".format(epoch_time))
 
-        total_test_loss = sum([value for key, value in test_losses.items() if key.endswith("loss")])
+        test_mse_loss = test_losses["mse_loss"]
+        test_sum_loss = sum([value for key, value in test_losses.items() if key.endswith("loss")])
 
         # Best model on test set
-        if best_test_loss == 0 or total_test_loss < best_test_loss:
-            best_test_loss = total_test_loss
+        if best_sum_loss == 0 or test_sum_loss < best_sum_loss:
+            best_sum_loss = test_sum_loss
             epochs_since_best = 0
-
             path = "{}/model/{}_state_dict_best.pt".format(save_path, args.model)
             if epoch <= pretrain_time:
                 path = "{}/model/{}_state_dict_best_pretrain.pt".format(save_path, args.model)
-
             torch.save(model.module.state_dict(), path)
             printlog("########## Best Model ###########")
+
+        elif "mse_loss" in test_losses and test_losses["mse_loss"] < best_mse_loss:
+            best_mse_loss = test_losses["mse_loss"]
+            epochs_since_best = 0
+            path = "{}/model/{}_state_dict_best_mse.pt".format(save_path, args.model)
+            torch.save(model.module.state_dict(), path)
+            printlog("######## Best MSE Model #########")
 
         # Periodically save model
         if epoch % save_every == 0:
@@ -416,14 +428,13 @@ if __name__ == "__main__":
         # End of pretrain stage
         if epoch == pretrain_time:
             printlog("######### End Pretrain ##########")
-            best_test_loss = 0
+            best_sum_loss = 0
             epochs_since_best = 0
             lr = max(args.start_lr, args.min_lr)
 
             state_dict = torch.load("{}/model/{}_state_dict_best_pretrain.pt".format(save_path, args.model))
             model.module.load_state_dict(state_dict)
-
             test_losses = run_epoch(model, optimizer, train=False)
             printlog("Test:\t" + loss_str(test_losses))
 
-    printlog("Best Test Loss: {:.4f}".format(best_test_loss))
+    printlog("Best Test Loss: {:.4f}".format(best_sum_loss))
