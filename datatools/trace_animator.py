@@ -43,7 +43,7 @@ class TraceAnimator:
         self.fps = fps
         self.play_speed = play_speed
 
-        anim_cols = ["inplay_records", "team1", "team2", "ball", "intent"]
+        anim_cols = ["inplay_records", "team1", "team2", "ball", "focus"]
         self.anim_args = pd.DataFrame(index=self.trace_dict.keys(), columns=anim_cols)
 
     @staticmethod
@@ -117,9 +117,9 @@ class TraceAnimator:
                     annots[p].set_alpha(0)
 
     @staticmethod
-    def plot_ball(trace: pd.DataFrame, ax=axes.Axes, color="w", edgecolor="k", marker="o", show_path=True):
-        x = trace.values[:, 0]
-        y = trace.values[:, 1]
+    def plot_ball(xy: pd.DataFrame, ax=axes.Axes, color="w", edgecolor="k", marker="o", show_path=True):
+        x = xy.values[:, 0]
+        y = xy.values[:, 1]
         scat = ax.scatter(x[0], y[0], s=300, c=color, edgecolors=edgecolor, marker=marker, zorder=4)
 
         if show_path:
@@ -143,6 +143,25 @@ class TraceAnimator:
         if plot is not None:
             t_from = max(t - 49, 0)
             plot.set_data(x[t_from : t + 1], y[t_from : t + 1])
+
+    @staticmethod
+    def plot_focus(xy: pd.DataFrame, ax=axes.Axes, color="purple"):
+        x = xy.values[:, 0]
+        y = xy.values[:, 1]
+        center_scat = ax.scatter(x[0], y[0], s=300, c=color, marker="+", linewidths=2, zorder=4)
+        edge_scat = ax.scatter(x[0], y[0], s=1000, c="None", edgecolors=color, marker="s", linewidths=2, zorder=4)
+        return x, y, center_scat, edge_scat
+
+    @staticmethod
+    def animate_focus(
+        t: int,
+        x: np.ndarray,
+        y: np.ndarray,
+        center_scat: collections.PatchCollection,
+        edge_scat: collections.PatchCollection,
+    ):
+        center_scat.set_offsets(np.array([x[t], y[t]]))
+        edge_scat.set_offsets(np.array([x[t], y[t]]))
 
     @staticmethod
     def plot_intent(ax=axes.Axes, patch_size=3):
@@ -196,20 +215,24 @@ class TraceAnimator:
 
         ball_args = None
         if "ball_x" in traces.columns and traces["ball_x"].notna().any():
-            ball_trace = traces[["ball_x", "ball_y"]]
+            ball_xy = traces[["ball_x", "ball_y"]]
             if trace_key == "main":
-                ball_args = self.plot_ball(ball_trace, ax, "w", "k", "o")
+                ball_args = TraceAnimator.plot_ball(ball_xy, ax, "w", "k", "o")
             else:
-                ball_args = self.plot_ball(ball_trace, ax, trace_key, None, "*")
+                ball_args = TraceAnimator.plot_ball(ball_xy, ax, trace_key, None, "*")
 
-        intent_args = None
+        focus_args = None
+        if "focus_x" in traces.columns and traces["focus_x"].notna().any():
+            focus_xy = traces[["focus_x", "focus_y"]]
+            focus_args = TraceAnimator.plot_focus(focus_xy, ax)
+
         # if "intent_x" in traces.columns and traces["intent_x"].notna().any():
         #     intents = traces[["intent_x", "intent_y"]].values
         #     patch = TraceHelper.plot_intent(ax)
         #     intent_args = [intents, patch]
 
         self.trace_dict[trace_key] = traces
-        self.anim_args.loc[trace_key] = [inplay_records, team1_args, team2_args, ball_args, intent_args]
+        self.anim_args.loc[trace_key] = [inplay_records, team1_args, team2_args, ball_args, focus_args]
 
     def run(self):
         fig, ax = plt.subplots(figsize=(20.8, 14.4))
@@ -256,7 +279,7 @@ class TraceAnimator:
                 team1_args = self.anim_args.at[key, "team1"]
                 team2_args = self.anim_args.at[key, "team2"]
                 ball_args = self.anim_args.at[key, "ball"]
-                intent_args = self.anim_args.at[key, "intent"]
+                focus_args = self.anim_args.at[key, "focus"]
 
                 if team1_args is not None:
                     TraceAnimator.animate_players(t, inplay_records, *team1_args)
@@ -264,8 +287,8 @@ class TraceAnimator:
                     TraceAnimator.animate_players(t, inplay_records, *team2_args)
                 if ball_args is not None:
                     TraceAnimator.animate_ball(t, *ball_args)
-                if intent_args is not None:
-                    TraceAnimator.animate_intent(t, *intent_args)
+                if focus_args is not None:
+                    TraceAnimator.animate_focus(t, *focus_args)
 
             if self.show_times:
                 time_annot.set_text(str(time_texts[t]))
