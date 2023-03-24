@@ -22,6 +22,7 @@ class TraceAnimator:
         show_times=True,
         show_episodes=False,
         show_events=False,
+        show_focus=False,
         annot_cols=None,  # column names for additional annotation
         rotate_pitch=False,
         anonymize=False,
@@ -35,6 +36,7 @@ class TraceAnimator:
         self.show_times = show_times
         self.show_episodes = show_episodes
         self.show_events = show_events
+        self.show_focus = show_focus
         self.annot_cols = annot_cols
         self.rotate_pitch = rotate_pitch
         self.anonymize = anonymize
@@ -149,7 +151,7 @@ class TraceAnimator:
         x = xy.values[:, 0]
         y = xy.values[:, 1]
         center_scat = ax.scatter(x[0], y[0], s=300, c=color, marker="+", linewidths=2, zorder=4)
-        edge_scat = ax.scatter(x[0], y[0], s=1000, c="None", edgecolors=color, marker="s", linewidths=2, zorder=4)
+        edge_scat = ax.scatter(x[0], y[0], s=600, c="None", edgecolors=color, marker="s", linewidths=2, zorder=4)
         return x, y, center_scat, edge_scat
 
     @staticmethod
@@ -222,7 +224,7 @@ class TraceAnimator:
                 ball_args = TraceAnimator.plot_ball(ball_xy, ax, trace_key, None, "*")
 
         focus_args = None
-        if "focus_x" in traces.columns and traces["focus_x"].notna().any():
+        if self.show_focus and "focus_x" in traces.columns and traces["focus_x"].notna().any():
             focus_xy = traces[["focus_x", "focus_y"]]
             focus_args = TraceAnimator.plot_focus(focus_xy, ax)
 

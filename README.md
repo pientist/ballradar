@@ -53,8 +53,8 @@ Especially, the former (`img/gps_18849-18850_00.00-05.00.mp4`) also contains a p
 
 You can simply import the class `TraceAnimator` in `datatools/trace_animator.py`, make a class object, and execute the method `run()`. Please refer to `model_eval.ipynb` for the usage of this tool.
 
-## Automated Zoom-In on Panoramic Match Video
-We also uploaded to the [Google Drive](https://drive.google.com/drive/u/1/folders/1xFSHaaIcyyuNplUUF4da9KVOFPiAIO6B) an easy-on-the-eye match video (`cam_18849-18850_00.00-05.00.mp4`)  generated from recording a match by fixed cameras installed in a single spot and zooming in on the stitched panoramic video. While in general a cameraman has to manually zoom in on different regions of the pitch during a match, our method can automatically find where to zoom in using the predicted ball locations.
+## Automated Zoom-in on Panoramic Match Video
+We also uploaded to the [Google Drive](https://drive.google.com/drive/u/1/folders/1xFSHaaIcyyuNplUUF4da9KVOFPiAIO6B) an easy-on-the-eye match video (`cam_18849-18850_00.00-05.00.mp4`)  generated from recording a match by fixed cameras installed in a single spot and zooming in on the stitched panoramic video. While in general a cameraman has to manually zoom in on different regions of the pitch during a match, our method automatically finds where to zoom in using the predicted ball locations.
 
 ![snapshot_cam](img/snapshot_cam.png)<br>
 
