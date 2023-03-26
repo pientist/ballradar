@@ -360,7 +360,7 @@ if __name__ == "__main__":
 
     # Train loop
     best_sum_loss = args.best_loss
-    best_mse_loss = 0
+    best_mse_loss = 100
     epochs_since_best = 0
     lr = max(args.start_lr, args.min_lr)
 

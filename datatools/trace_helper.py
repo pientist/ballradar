@@ -90,8 +90,8 @@ class TraceHelper:
         team_poss.iloc[:-nans] = team
         return team_poss.replace({0: np.nan, 1: "A", 2: "B"})
 
-    def find_gt_team_poss(self, player_poss_col="event_player"):
-        self.traces["team_poss"] = self.traces[player_poss_col].fillna(method="ffill").fillna(method="bfill")
+    def find_gt_team_poss(self, player_poss_col="player_poss"):
+        self.traces["team_poss"] = self.traces[player_poss_col].fillna(method="bfill").fillna(method="ffill")
         self.traces["team_poss"] = self.traces["team_poss"].apply(lambda x: x[0])
 
         # team_poss_dict = {"T": np.nan, "O": 0, "A": 1, "B": 2}
@@ -290,12 +290,12 @@ class TraceHelper:
                     if macro_type == "team_poss":
                         macro_target = torch.LongTensor((episode_traces["team_poss"] == team2_code).values)
                     elif macro_type == "player_poss":
-                        player_poss = episode_traces["event_player"].fillna(method="bfill").fillna(method="ffill")
+                        player_poss = episode_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
                         macro_target = torch.LongTensor(player_poss.map(poss_dict).values)
 
                 micro_target = None
                 if target_type == "player_poss":
-                    player_poss = episode_traces["event_player"].fillna(method="bfill").fillna(method="ffill")
+                    player_poss = episode_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
                     micro_target = torch.LongTensor(player_poss.map(poss_dict).values)
                 elif target_type in ["gk", "ball"]:
                     micro_target = torch.FloatTensor(episode_traces[output_cols].values)

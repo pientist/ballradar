@@ -232,7 +232,7 @@ class MetricaHelper(TraceHelper):
 
         for phase in self.traces["phase"].unique():
             phase_traces = self.traces[self.traces["phase"] == phase]
-            phase_events = self.events[self.events["phase"] == phase]
+            phase_events = self.events[(self.events["phase"] == phase) & (self.events["type"] != "CARD")]
             assert isinstance(phase_events, pd.DataFrame)
 
             time_diffs = phase_events["start_time"].diff().fillna(60)
@@ -306,9 +306,6 @@ class MetricaHelper(TraceHelper):
         poss_next = self.traces["player_poss"].fillna(method="bfill")
         self.traces["player_poss"] = poss_prev.where(poss_prev == poss_next, np.nan)
         self.traces.reset_index(inplace=True)
-
-    def find_gt_team_poss(self):
-        return super().find_gt_team_poss(player_poss_col="player_poss")
 
     @staticmethod
     def find_nearest_player(snapshot, players, team_code=None):

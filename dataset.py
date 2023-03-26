@@ -70,7 +70,7 @@ class SoccerDataset(Dataset):
                 player_cols = [c for c in match_traces.columns if c[0] in ["A", "B"] and c[3:] in self.feature_types]
 
                 if target_type == "transition":
-                    trans_flags = (match_traces["event_player"].isna()).astype(int)
+                    trans_flags = (match_traces["player_poss"].isna()).astype(int)
 
                 if macro_type == "player_poss" or target_type == "player_poss":
                     outside_labels = ["OUT-L", "OUT-R", "OUT-B", "OUT-T"]
@@ -126,7 +126,7 @@ class SoccerDataset(Dataset):
                         if macro_type == "team_poss":
                             episode_macro = (episode_traces["team_poss"] == team2_code).astype(int).values
                         elif macro_type == "player_poss":
-                            player_poss = episode_traces["event_player"].fillna(method="bfill").fillna(method="ffill")
+                            player_poss = episode_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
                             episode_macro = player_poss.map(poss_dict).values
 
                         if target_type == "transition":
@@ -134,7 +134,7 @@ class SoccerDataset(Dataset):
                         elif target_type == "team_poss":
                             episode_target = (episode_traces["team_poss"] == team2_code).astype(int).values
                         elif target_type == "player_poss":
-                            player_poss = episode_traces["event_player"].fillna(method="bfill").fillna(method="ffill")
+                            player_poss = episode_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
                             episode_target = player_poss.map(poss_dict).values
                         else:  # target_type in ["gk", "ball"]
                             episode_target = episode_traces[target_cols].values

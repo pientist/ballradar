@@ -16,6 +16,7 @@ class Postprocessor:
         self.target_traces = self.traces[["ball_x", "ball_y"]] if "ball_x" in traces.columns else None
 
         self.poss_scores = pd.DataFrame(index=self.traces.index, columns=pred_poss.columns, dtype=float)
+        self.carry_records = None
 
         output_cols = ["carrier", "ball_x", "ball_y", "focus_x", "focus_y"]
         self.output = pd.DataFrame(index=self.traces.index, columns=output_cols)
@@ -269,8 +270,10 @@ class Postprocessor:
             sum_macro_acc = 0
             sum_micro_pos_errors = 0
 
+        carry_records_list = []
+
         for phase in tqdm(self.traces["phase"].unique()):
-            phase_traces = self.traces.loc[self.traces["phase"] == phase].copy()
+            phase_traces = self.traces[self.traces["phase"] == phase].copy()
             phase_pred_poss = self.pred_poss.loc[phase_traces.index]
             phase_pred_traces = self.pred_traces.loc[phase_traces.index]
 
@@ -288,14 +291,16 @@ class Postprocessor:
 
                     ep_pred_traces = Postprocessor.calc_ball_features(ep_pred_traces)
                     carry_records = Postprocessor.detect_carries_by_accel(ep_traces, ep_pred_traces, players, max_accel)
-
                     ep_output = Postprocessor.finetune_ball_trace(ep_traces, ep_pred_traces, carry_records)
+
+                    carry_records["phase"] = phase
+                    carry_records_list.append(carry_records)
                     self.output.loc[ep_traces.index] = ep_output
 
                     if evaluate:
                         n_frames += ep_traces.shape[0]
 
-                        ep_target_poss = ep_traces["event_player"].fillna(method="bfill").fillna(method="ffill")
+                        ep_target_poss = ep_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
                         ep_output_poss = ep_output["carrier"].fillna(method="bfill").fillna(method="ffill")
                         sum_macro_acc += (ep_target_poss == ep_output_poss).astype(int).sum()
 
@@ -313,6 +318,9 @@ class Postprocessor:
                     phase_traces, phase_pred_poss, phase_pred_traces, players, thres_touch, thres_carry
                 )
                 phase_output = Postprocessor.finetune_ball_trace(phase_traces, phase_pred_traces, carry_records)
+
+                carry_records["phase"] = phase
+                carry_records_list.append(carry_records)
                 self.output.loc[phase_traces.index] = phase_output
 
                 cols = [c for c in poss_scores.columns if not c.startswith("max")]
@@ -326,7 +334,7 @@ class Postprocessor:
                         ep_output = self.output.loc[ep_traces.index]
                         n_frames += ep_traces.shape[0]
 
-                        ep_target_poss = ep_traces["event_player"].fillna(method="bfill").fillna(method="ffill")
+                        ep_target_poss = ep_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
                         ep_output_poss = ep_output["carrier"].fillna(method="bfill").fillna(method="ffill")
                         sum_macro_acc += (ep_target_poss == ep_output_poss).astype(int).sum()
 
@@ -334,6 +342,8 @@ class Postprocessor:
                         error_x = (ep_output["ball_x"] - ep_target_traces["ball_x"]).values
                         error_y = (ep_output["ball_y"] - ep_target_traces["ball_y"]).values
                         sum_micro_pos_errors += np.sqrt((error_x**2 + error_y**2).astype(float)).sum()
+
+        self.carry_records = pd.concat(carry_records_list)
 
         if evaluate and n_frames > 0:
             print(f"macro_acc: {round(sum_macro_acc / n_frames, 4)}")
@@ -390,11 +400,11 @@ class Postprocessor:
 
         if carry_records is not None:
             for i in carry_records.index:
-                start_time = carry_records.loc[i, "start_idx"] / 10
-                end_time = carry_records.loc[i, "end_idx"] / 10
+                start_time = times.at[carry_records.at[i, "start_idx"]]
+                end_time = times.at[carry_records.at[i, "end_idx"]]
 
                 if "carrier" in carry_records.columns:
-                    carrier = carry_records.loc[i, "carrier"]
+                    carrier = carry_records.at[i, "carrier"]
                     color = color_dict[carrier]
                 else:
                     color = "gray"
