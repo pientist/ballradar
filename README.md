@@ -40,22 +40,16 @@ Also, you can train the other models that we introduced in Section 4.2 of the pa
 To evaluate the model performance, please run `model_eval.ipynb` which can reproduce the results of Section 4.4 and Section 4.5.
 
 ## Animating Match Scenes
-For interpretability, we have implemented a tool named `TraceAnimator` for dynamically visualizing scenes using tracking data in soccer matches. It animates multiple types of trajectories, including true player and ball trajectories and the virtual trajectories predicted by multiple models at the same time. We have attached sample 5-minute animations (`img/gps_18849-18850_00.00-05.00.mp4` and `img/metrica_match2_00.00-05.00.mp4`) resulting from applying our model to a match in the Figother dataset and a match in the Metrica dataset, respectively. Both animations include the following:
+For interpretability, we have implemented a tool named `TraceAnimator` for dynamically visualizing scenes using tracking data in soccer matches. It animates multiple types of trajectories, including true player and ball trajectories and the virtual trajectories predicted by multiple models at the same time. We have attached a sample 5-minute animation (`img/metrica_match2_00.00-05.00.mp4`) resulting from applying our model to a match in the Metrica dataset, respectively. Both animations include the following:
 
 - player trajectories (red and blue circles with numbers inside)
 - true ball trajectory (white circle)
 - output of the ball trajectory regressor (orange star)
 - predicted ball trajectory after the postprocessing (green star)
 
-Especially, the former (`img/gps_18849-18850_00.00-05.00.mp4`) also contains a purple plus marker indicating where to zoom in on the panoramic match video recorded by a fixed camera, which is elaborated more below.
-
-![snapshot_anim](img/snapshot_anim.png)<br>
-
 You can simply import the class `TraceAnimator` in `datatools/trace_animator.py`, make a class object, and execute the method `run()`. Please refer to `model_eval.ipynb` for the usage of this tool.
 
-## Automated Zoom-in on Panoramic Match Video
-We also uploaded to the [Google Drive](https://drive.google.com/drive/u/1/folders/1xFSHaaIcyyuNplUUF4da9KVOFPiAIO6B) an easy-on-the-eye match video (`cam_18849-18850_00.00-05.00.mp4`)  generated from recording a match by fixed cameras installed in a single spot and zooming in on the stitched panoramic video. While in general a cameraman has to manually zoom in on different regions of the pitch during a match, our method automatically finds where to zoom in using the predicted ball locations.
+## Automated Zoom-in on Panoramic Match Videos
+We prepared a video resulting from recording a K League match with a fixed camera and automatically zooming in on the panoramic video as mentioned in Section 5.1 of the paper. However, unfortunately, we cannot make it public because there is an issue with broadcasting rights between K League. Instead, we attached an animation (`img/gps_18849-18850_00.00-05.00.mp4`) that visualizes a K League match with an additional purple plus marker indicating the center of zooming in on the panoramic match video recorded by a fixed camera. Note that the locations of the center are different from the predicted ball locations, since they result from additional smoothing and clipping processes for a realistic outcome.
 
-![snapshot_cam](img/snapshot_cam.png)<br>
-
-The purple plus marker in each snapshot of the animation (`img/gps_18849-18850_00.00-05.00.mp4`) indicates the center of the corresponding snapshot of the video. Note that the locations of this centers are different from the predicted ball locations, since they result from additional smoothing and clipping processes for a realistic outcome.
+![snapshot_anim](img/snapshot_anim.png)<br>
