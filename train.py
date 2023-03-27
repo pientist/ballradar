@@ -129,7 +129,8 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
                 with torch.no_grad():
                     out = model(input, macro_target, micro_target)
 
-            macro_out = out[:, :, :-2].transpose(1, 2)
+            micro_out_dim = model.module.micro_out_dim  # 4 if target_type == "gk" else 2
+            macro_out = out[:, :, :-micro_out_dim].transpose(1, 2)
             macro_weight = model.module.params["macro_weight"]
             macro_loss = nn.CrossEntropyLoss()(macro_out, macro_target) * macro_weight
 
@@ -137,7 +138,7 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
             loss_dict["macro_acc"] += [calc_class_acc(macro_out, macro_target)]
 
             if model.module.model_type == "macro_classifier":
-                micro_out = out[:, :, -2:].transpose(1, 2)
+                micro_out = out[:, :, -micro_out_dim:].transpose(1, 2)
                 micro_loss = nn.CrossEntropyLoss()(micro_out, micro_target)
                 loss = macro_loss + micro_loss
 
@@ -145,7 +146,7 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
                 loss_dict["micro_acc"] += [calc_class_acc(micro_out, micro_target)]
 
             else:  # model.module.model_type == "macro_regressor"
-                micro_out = out[:, :, -2:]
+                micro_out = out[:, :, -micro_out_dim:]
                 if "speed_loss" in model.module.params and model.module.params["speed_loss"]:
                     micro_out = calc_speed(micro_out)
 
@@ -307,11 +308,11 @@ if __name__ == "__main__":
     print("Generating datasets...")
 
     if args.target_type == "gk":
-        train_files = ["match1.csv", "match2.csv"]
-        test_files = ["match3_valid.csv"]
+        train_files = ["match1.csv", "match2.csv", "match3_valid.csv"]
+        valid_files = ["match3_test.csv"]
 
         train_paths = [f"data/metrica_traces/{f}" for f in train_files]
-        valid_paths = [f"data/metrica_traces/{f}" for f in test_files]
+        valid_paths = [f"data/metrica_traces/{f}" for f in valid_files]
 
     else:  # if args.target_type == "ball":
         metrica_files = ["match1.csv", "match2.csv", "match3_valid.csv"]
@@ -360,7 +361,7 @@ if __name__ == "__main__":
 
     # Train loop
     best_sum_loss = args.best_loss
-    best_mse_loss = 100
+    best_mse_loss = args.best_loss
     epochs_since_best = 0
     lr = max(args.start_lr, args.min_lr)
 

@@ -54,7 +54,7 @@ class PlayerBall(nn.Module):
             dropout=dropout,
             bidirectional=params["bidirectional"],
         )
-        self.macro_fc = nn.Sequential(nn.Linear(self.macro_rnn_dim * 2, 2), nn.Dropout(0), nn.GLU())
+        self.macro_fc = nn.Sequential(nn.Linear(self.macro_rnn_dim * 2, 2), nn.GLU())
 
         self.micro_team1_st = SetTransformer(self.x_dim + self.macro_rnn_dim * 2 + 1, self.micro_pi_dim, embed_type="i")
         self.micro_team2_st = SetTransformer(self.x_dim + self.macro_rnn_dim * 2 + 1, self.micro_pi_dim, embed_type="i")
@@ -148,10 +148,10 @@ class PlayerBall(nn.Module):
         micro_z = torch.cat([micro_team1_z, micro_team2_z, micro_outside_z], -1)  # [time, bs, micro_z * 3]
         micro_z = self.micro_embed_fc(micro_z).reshape(seq_len, batch_size, -1)  # [time, bs, micro_z]
 
-        micro_rnn_input = torch.cat([micro_z, masked_micro_target], dim=-1)  # [time, bs, micro_z + micro]
+        micro_rnn_input = torch.cat([micro_z, masked_micro_target], dim=-1)  # [time, bs, micro_z + micro_out]
         micro_h, _ = self.micro_rnn(micro_rnn_input)  # [time, bs, micro_rnn * 2]
-        micro_out = self.micro_fc(micro_h).transpose(0, 1)  # [bs, time, micro]
+        micro_out = self.micro_fc(micro_h).transpose(0, 1)  # [bs, time, micro_out]
 
         macro_out = macro_out.squeeze(-1).reshape(seq_len, batch_size, -1).transpose(0, 1)  # [bs, time, comp]
         ps = torch.tensor([108, 72]).to(input.device)
-        return torch.cat([macro_out, micro_out * ps], -1)  # [bs, time, comp + micro]
+        return torch.cat([macro_out, micro_out * ps], -1)  # [bs, time, comp + micro_out]
