@@ -21,12 +21,12 @@ $ pip install -r requirements.txt
 ```
 
 ## Data Usage
-For the research, we have used a mixed dataset including the following:
+For this study, we have used a mixed dataset including the following:
 
 - Fitogether data: 15 matches of GPS tracking data combined with the corresponding event data provided by [Fitogether](https://www.fitogether.com).
-- Metrica data: 3 matches of *publicly available* optical tracking and event data provided by [Metrica Sports](https://metrica-sports.com).
+- Metrica data: 3 matches of publicly available optical tracking and event data provided by [Metrica Sports](https://metrica-sports.com).
 
-Unfortunately, we cannot share the Fitogether data because it is the company's internal information, but every process can be reproduced only using Metrica data with little performance degradation. (See Table 5 of the paper.) We have attached the preprocessed version of the Metrica event data to `data/metrica_events/` and uploaded that of the Metrica tracking data to my [Google Drive](https://drive.google.com/drive/u/1/folders/1xFSHaaIcyyuNplUUF4da9KVOFPiAIO6B). To execute the code, you should download the tracking data files from the drive and locate them in `data/metrica_traces/`.
+Unfortunately, we cannot share the Fitogether data because it is the company's internal information, but every process can be reproduced using Metrica data with little performance degradation. (See Table 5 of the paper.) We have attached the preprocessed version of the Metrica event data to `data/metrica_events/` and uploaded that of the Metrica tracking data to my [Google Drive](https://drive.google.com/drive/u/1/folders/1xFSHaaIcyyuNplUUF4da9KVOFPiAIO6B). To execute the code, you should download the tracking data files from the drive and locate them in `data/metrica_traces/`.
 
 For your reference, we have also attached the preprocessing code in `datatools/metrica_data_processing.ipynb`. That is, you can regenerate the preprocessed data files on your own by downloading the raw Metrica data from the [original repository](https://github.com/metrica-sports/sample-data), locating the CSV files in `data/metrica_traces/Sample_Game_X` for each game, and executing `datatools/metrica_data_processing.ipynb`.
 
@@ -40,16 +40,23 @@ Also, you can train the other models that we introduced in Section 4.2 of the pa
 To evaluate the model performance, please run `model_eval.ipynb` which can reproduce the results of Section 4.4 and Section 4.5.
 
 ## Animating Match Scenes
-For interpretability, we have implemented a tool named `TraceAnimator` for dynamically visualizing scenes using tracking data in soccer matches. It animates multiple types of trajectories, including true player and ball trajectories and the virtual trajectories predicted by multiple models at the same time. We have attached a sample 5-minute animation (`img/metrica_match2_00.00-05.00.mp4`) resulting from applying our model to a match in the Metrica dataset, respectively. Both animations include the following:
+For interpretability, we have implemented a tool named `TraceAnimator` for dynamically visualizing soccer match tracking data. It animates multiple types of trajectories, including true player and ball trajectories and the predicted trajectories generated from different steps. We have attached a sample 5-minute animation (`img/metrica_match2_00.00-05.00.mp4`) resulting from applying our model to a match in the Metrica dataset, respectively. Both animations include the following:
 
 - player trajectories (red and blue circles with numbers inside)
 - true ball trajectory (white circle)
 - output of the ball trajectory regressor (orange star)
 - predicted ball trajectory after the postprocessing (green star)
 
-You can simply import the class `TraceAnimator` in `datatools/trace_animator.py`, make a class object, and execute the method `run()`. Please refer to `model_eval.ipynb` for the usage of this tool.
+![metrica_anim](img/metrica_anim.png)<br>
+
+You can animate an arbitrary slice of Metrica data by importing the class `TraceAnimator` in `datatools/trace_animator.py`, making a class object, and executing the method `run()`. Please refer to `model_eval.ipynb` for the exact usage of this tool.
 
 ## Automated Zoom-in on Panoramic Match Videos
-We prepared a video resulting from recording a K League match with a fixed camera and automatically zooming in on the panoramic video as mentioned in Section 5.1 of the paper. However, unfortunately, we cannot make it public because there is an issue with broadcasting rights between K League. Instead, we attached an animation (`img/gps_18849-18850_00.00-05.00.mp4`) that visualizes a K League match with an additional purple plus marker indicating the center of zooming in on the panoramic match video recorded by a fixed camera. Note that the locations of the center are different from the predicted ball locations, since they result from additional smoothing and clipping processes for a realistic outcome.
+As mentioned in Section 5.1 of the paper, we prepared a video resulting from recording a K League match by a fixed camera and automatically zooming in on the panoramic video.
 
-![snapshot_anim](img/snapshot_anim.png)<br>
+![kleague_cam_zoomin_1](img/kleague_cam_zoomin_1.png)<br>
+![kleague_cam_zoomin_2](img/kleague_cam_zoomin_2.png)<br>
+
+However, we cannot make the video public because an issue about broadcasting rights between K League arose after submitting the paper. Instead, we attached an animation (`img/gps_18849-18850_00.00-05.00.mp4`) that visualizes a K League match with an additional purple plus marker indicating the center of zooming in on the panoramic match video recorded by a fixed camera. Note that the locations of the center are different from the predicted ball locations, since they result from additional smoothing and clipping processes for a realistic outcome.
+
+![kleague_anim](img/kleague_anim.png)<br>
