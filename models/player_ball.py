@@ -12,6 +12,9 @@ class PlayerBall(nn.Module):
 
         self.model_args = [
             "n_players",
+            "macro_ppe",
+            "macro_fpe",
+            "macro_fpi",
             "macro_pe_dim",
             "macro_pi_dim",
             "macro_rnn_dim",
@@ -40,15 +43,25 @@ class PlayerBall(nn.Module):
 
         dropout = params["dropout"] if "dropout" in params else 0
 
-        self.macro_team1_st = SetTransformer(self.x_dim + 1, self.macro_pe_dim, embed_type="e")
-        self.macro_team2_st = SetTransformer(self.x_dim + 1, self.macro_pe_dim, embed_type="e")
-        self.macro_outside_fc = nn.Linear(self.x_dim + 1, self.macro_pe_dim)
+        assert params["macro_ppe"] or params["macro_fpe"] or params["macro_fpi"]
+        macro_rnn_input_dim = self.x_dim + 1
 
-        self.fpe_st = SetTransformer(self.x_dim + 1, self.macro_pi_dim, embed_type="e")
-        self.fpi_st = SetTransformer(self.x_dim + 1, self.macro_pe_dim, embed_type="i")
+        if params["macro_ppe"]:
+            self.macro_team1_st = SetTransformer(self.x_dim + 1, self.macro_pe_dim, embed_type="e")
+            self.macro_team2_st = SetTransformer(self.x_dim + 1, self.macro_pe_dim, embed_type="e")
+            self.macro_outside_fc = nn.Linear(self.x_dim + 1, self.macro_pe_dim)
+            macro_rnn_input_dim += self.macro_pe_dim
+
+        if params["macro_fpe"]:
+            self.fpe_st = SetTransformer(self.x_dim + 1, self.macro_pe_dim, embed_type="e")
+            macro_rnn_input_dim += self.macro_pe_dim
+
+        if params["macro_fpi"]:
+            self.fpi_st = SetTransformer(self.x_dim + 1, self.macro_pi_dim, embed_type="i")
+            macro_rnn_input_dim += self.macro_pi_dim
 
         self.macro_rnn = nn.LSTM(
-            input_size=self.x_dim + 1 + self.macro_pe_dim * 2 + self.macro_pi_dim,
+            input_size=macro_rnn_input_dim,
             hidden_size=self.macro_rnn_dim,
             num_layers=self.n_layers,
             dropout=dropout,
@@ -119,16 +132,25 @@ class PlayerBall(nn.Module):
         outside_x = outside_x.reshape(seq_len * batch_size, 4, self.x_dim)  # [time * bs, 4, x]
         outside_x_expanded = torch.cat([outside_x, masked_macro_target[:, -4:]], -1)  # [time * bs, 4, x + 1]
 
-        team1_z = self.macro_team1_st(team1_x_expanded)  # [time * bs, player, macro_pe]
-        team2_z = self.macro_team2_st(team2_x_expanded)  # [time * bs, player, macro_pe]
-        outsize_z = self.macro_outside_fc(outside_x_expanded)  # [time * bs, 4, macro_pe]
-        ppe_z = torch.cat([team1_z, team2_z, outsize_z], dim=1)  # [time * bs, comp, macro_pe]
-
         x = torch.cat([team1_x_expanded, team2_x_expanded, outside_x_expanded], 1)  # [time * bs, comp, x + 1]
-        fpe_z = self.fpe_st(x)  # [time * bs, comp, macro_pe]
-        fpi_z = self.fpi_st(x).unsqueeze(1).expand(-1, self.n_components, -1)  # [time * bs, comp, macro_pi]
+        macro_rnn_input = x
 
-        macro_rnn_input = torch.cat([x, ppe_z, fpe_z, fpi_z], -1).reshape(seq_len, batch_size * self.n_components, -1)
+        if self.params["macro_ppe"]:
+            team1_z = self.macro_team1_st(team1_x_expanded)  # [time * bs, player, macro_pe]
+            team2_z = self.macro_team2_st(team2_x_expanded)  # [time * bs, player, macro_pe]
+            outsize_z = self.macro_outside_fc(outside_x_expanded)  # [time * bs, 4, macro_pe]
+            ppe_z = torch.cat([team1_z, team2_z, outsize_z], dim=1)  # [time * bs, comp, macro_pe]
+            macro_rnn_input = torch.cat([x, ppe_z], -1)  # [time * bs, comp, x + 1 + macro_pe]
+
+        if self.params["macro_fpe"]:
+            fpe_z = self.fpe_st(x)  # [time * bs, comp, macro_pe]
+            macro_rnn_input = torch.cat([macro_rnn_input, fpe_z], -1)
+
+        if self.params["macro_fpi"]:
+            fpi_z = self.fpi_st(x).unsqueeze(1).expand(-1, self.n_components, -1)  # [time * bs, comp, macro_pi]
+            macro_rnn_input = torch.cat([macro_rnn_input, fpi_z], -1)
+
+        macro_rnn_input = macro_rnn_input.reshape(seq_len, batch_size * self.n_components, -1)
         macro_h, _ = self.macro_rnn(macro_rnn_input)  # [time, bs * comp, macro_rnn * 2]
 
         macro_h = macro_h.reshape(seq_len * batch_size, self.n_components, -1)  # [time * bs, comp, macro_rnn * 2]

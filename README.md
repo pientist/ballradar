@@ -57,6 +57,6 @@ As mentioned in Section 5.1 of the paper, we prepared a video resulting from rec
 ![kleague_cam_zoomin_1](img/kleague_cam_zoomin_1.png)<br>
 ![kleague_cam_zoomin_2](img/kleague_cam_zoomin_2.png)<br>
 
-However, we cannot make the video public because an issue about broadcasting rights between K League arose after submitting the paper. Instead, we attached an animation (`img/gps_18849-18850_00.00-05.00.mp4`) that visualizes a K League match with an additional purple plus marker indicating the center of zooming in on the panoramic match video recorded by a fixed camera. Note that the locations of the center are different from the predicted ball locations, since they result from additional smoothing and clipping processes for a realistic outcome.
+However, we cannot make the video public because an issue about broadcasting rights between K League arose after submitting the paper. Instead, we attached an animation (`img/gps_18849-18850_00.00-05.00.mp4`) that visualizes a K League match with an additional purple plus marker indicating where to zoom in on the panoramic match video. Note that the locations of the center are different from the predicted ball locations, since they result from additional smoothing and clipping processes for a realistic outcome.
 
 ![kleague_anim](img/kleague_anim.png)<br>

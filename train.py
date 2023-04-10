@@ -299,7 +299,7 @@ if __name__ == "__main__":
             print_keys += ["masking"]
 
         printlog(title)
-        printlog(model.module.params_str)
+        # printlog(model.module.params_str)
         printlog(get_params_str(print_keys, model.module.params))
         printlog("n_params {:,}".format(params["total_params"]))
     printlog("############################################################")

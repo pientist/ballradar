@@ -1,5 +1,5 @@
 python train.py \
---trial 909 \
+--trial 911 \
 --model player_ball \
 --macro_type player_poss \
 --target_type ball \
@@ -9,9 +9,13 @@ python train.py \
 --bidirectional \
 --train_fito \
 --valid_fito \
+--train_metrica \
+--valid_metrica \
 --flip_pitch \
 --n_players 11 \
 --n_features 6 \
+--macro_ppe \
+--macro_fpe \
 --macro_pe_dim 16 \
 --macro_pi_dim 16 \
 --macro_rnn_dim 256 \

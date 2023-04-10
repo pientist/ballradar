@@ -21,7 +21,9 @@ def parse_model_params(model_args, params, parser):
         if arg.startswith("n_") or arg.endswith("_dim"):
             parser.add_argument("--" + arg, type=int, required=True)
         elif arg == "dropout":
-            parser.add_argument("--" + arg, type=float, required=False, default=0)
+            parser.add_argument("--" + arg, type=float, default=0)
+        else:
+            parser.add_argument("--" + arg, action="store_true", default=False)
     args, _ = parser.parse_known_args()
 
     for arg in model_args:
