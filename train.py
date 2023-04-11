@@ -63,14 +63,17 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
         else:
             loss_dict = {"mse_loss": [], "pos_error": []}
 
+    elif model.module.model_type == "generator":
+        loss_dict = {"kld_loss": [], "recon_loss": [], "pos_error": []}
+
     elif model.module.model_type == "macro_classifier":
         loss_dict = {"ce_loss": [], "micro_ce_loss": [], "macro_acc": [], "micro_acc": []}
 
     elif model.module.model_type == "macro_regressor":
         if "rloss_weight" in model.module.params and model.module.params["rloss_weight"] > 0:
-            loss_dict = {"ce_loss": [], "mse_loss": [], "real_loss": [], "macro_acc": [], "micro_pos_error": []}
+            loss_dict = {"ce_loss": [], "mse_loss": [], "real_loss": [], "accuracy": [], "pos_error": []}
         else:
-            loss_dict = {"ce_loss": [], "mse_loss": [], "macro_acc": [], "micro_pos_error": []}
+            loss_dict = {"ce_loss": [], "mse_loss": [], "accuracy": [], "pos_error": []}
 
     for batch_idx, data in enumerate(loader):
         if model.module.model_type == "classifier":
@@ -118,6 +121,21 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
             else:
                 loss_dict["pos_error"] += [calc_trace_dist(out[:, :, 0:2], target[:, :, 0:2])]
 
+        elif model.module.model_type == "generator":
+            input = data[0].to(default_device)
+            target = data[1].to(default_device)
+
+            if train:
+                loss_tensor = model(input, target).mean(0)
+                loss = loss_tensor[0] + loss_tensor[1]  # kld_loss + recon_loss
+            else:
+                with torch.no_grad():
+                    loss_tensor = model(input, target).mean(0)
+
+            loss_dict["kld_loss"] += [loss_tensor[0].item()]
+            loss_dict["recon_loss"] += [loss_tensor[1].item()]
+            loss_dict["pos_error"] += [loss_tensor[2].item()]
+
         elif model.module.model_type.startswith("macro"):
             input = data[0].to(default_device)
             macro_target = data[1].to(default_device)
@@ -134,10 +152,10 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
             macro_weight = model.module.params["macro_weight"]
             macro_loss = nn.CrossEntropyLoss()(macro_out, macro_target) * macro_weight
 
-            loss_dict["ce_loss"] += [macro_loss.item()]
-            loss_dict["macro_acc"] += [calc_class_acc(macro_out, macro_target)]
-
             if model.module.model_type == "macro_classifier":
+                loss_dict["ce_loss"] += [macro_loss.item()]
+                loss_dict["macro_acc"] += [calc_class_acc(macro_out, macro_target)]
+
                 micro_out = out[:, :, -micro_out_dim:].transpose(1, 2)
                 micro_loss = nn.CrossEntropyLoss()(micro_out, micro_target)
                 loss = macro_loss + micro_loss
@@ -146,6 +164,9 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
                 loss_dict["micro_acc"] += [calc_class_acc(micro_out, micro_target)]
 
             else:  # model.module.model_type == "macro_regressor"
+                loss_dict["ce_loss"] += [macro_loss.item()]
+                loss_dict["accuracy"] += [calc_class_acc(macro_out, macro_target)]
+
                 micro_out = out[:, :, -micro_out_dim:]
                 if "speed_loss" in model.module.params and model.module.params["speed_loss"]:
                     micro_out = calc_speed(micro_out)
@@ -164,9 +185,9 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
                 if model.module.target_type == "gk":
                     team1_pos_error = calc_trace_dist(micro_out[:, :, 0:2], micro_target[:, :, 0:2])
                     team2_pos_error = calc_trace_dist(micro_out[:, :, 2:4], micro_target[:, :, 2:4])
-                    loss_dict["micro_pos_error"] += [(team1_pos_error + team2_pos_error) / 2]
+                    loss_dict["pos_error"] += [(team1_pos_error + team2_pos_error) / 2]
                 else:
-                    loss_dict["micro_pos_error"] += [calc_trace_dist(micro_out[:, :, 0:2], micro_target[:, :, 0:2])]
+                    loss_dict["pos_error"] += [calc_trace_dist(micro_out[:, :, 0:2], micro_target[:, :, 0:2])]
 
         if train:
             optimizer.zero_grad()
@@ -360,8 +381,8 @@ if __name__ == "__main__":
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, num_workers=nw, pin_memory=True)
 
     # Train loop
-    best_sum_loss = args.best_loss
-    best_mse_loss = args.best_loss
+    best_total_loss = args.best_loss
+    best_pos_error = 0
     epochs_since_best = 0
     lr = max(args.start_lr, args.min_lr)
 
@@ -400,25 +421,27 @@ if __name__ == "__main__":
         epoch_time = time.time() - start_time
         printlog("Time:\t {:.2f}s".format(epoch_time))
 
-        test_mse_loss = test_losses["mse_loss"]
-        test_sum_loss = sum([value for key, value in test_losses.items() if key.endswith("loss")])
+        test_total_loss = sum([value for key, value in test_losses.items() if key.endswith("loss")])
 
         # Best model on test set
-        if best_sum_loss == 0 or test_sum_loss < best_sum_loss:
-            best_sum_loss = test_sum_loss
+        if best_total_loss == 0 or test_total_loss < best_total_loss:
+            best_total_loss = test_total_loss
+            best_pos_error = test_losses["pos_error"]
             epochs_since_best = 0
+
             path = "{}/model/{}_state_dict_best.pt".format(save_path, args.model)
             if epoch <= pretrain_time:
                 path = "{}/model/{}_state_dict_best_pretrain.pt".format(save_path, args.model)
             torch.save(model.module.state_dict(), path)
-            printlog("########## Best Model ###########")
+            printlog("########### Best Loss ###########")
 
-        elif "mse_loss" in test_losses and test_losses["mse_loss"] < best_mse_loss:
-            best_mse_loss = test_losses["mse_loss"]
+        elif "pos_error" in test_losses and test_losses["pos_error"] < best_pos_error:
+            best_pos_error = test_losses["pos_error"]
             epochs_since_best = 0
-            path = "{}/model/{}_state_dict_best_mse.pt".format(save_path, args.model)
+
+            path = "{}/model/{}_state_dict_best_pe.pt".format(save_path, args.model)
             torch.save(model.module.state_dict(), path)
-            printlog("######## Best MSE Model #########")
+            printlog("######## Best Pos Error #########")
 
         # Periodically save model
         if epoch % save_every == 0:
@@ -429,7 +452,7 @@ if __name__ == "__main__":
         # End of pretrain stage
         if epoch == pretrain_time:
             printlog("######### End Pretrain ##########")
-            best_sum_loss = 0
+            best_total_loss = 0
             epochs_since_best = 0
             lr = max(args.start_lr, args.min_lr)
 
@@ -438,4 +461,4 @@ if __name__ == "__main__":
             test_losses = run_epoch(model, optimizer, train=False)
             printlog("Test:\t" + loss_str(test_losses))
 
-    printlog("Best Test Loss: {:.4f}".format(best_sum_loss))
+    printlog("Best Test Loss: {:.4f}".format(best_total_loss))

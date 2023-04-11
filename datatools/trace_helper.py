@@ -17,7 +17,7 @@ from scipy.ndimage import shift
 from tqdm import tqdm
 
 from dataset import SoccerDataset
-from models import PlayerBall
+from models import PIVRNN, PlayerBall
 from models.utils import calc_class_acc, calc_trace_dist
 
 
@@ -139,7 +139,9 @@ class TraceHelper:
                 macro_target = macro_target.unsqueeze(0).to(device) if macro_target is not None else None
                 micro_target = micro_target.unsqueeze(0).to(device) if micro_target is not None else None
                 return model.forward(input, macro_target, micro_target, masking_prob).squeeze(0).detach().cpu()
-            else:
+            elif isinstance(model, PIVRNN):
+                return model.sample(input).squeeze(0).detach().cpu()
+            else:  # Non-hierarchical LSTM models
                 return model.forward(input).squeeze(0).detach().cpu()
 
         else:
@@ -181,9 +183,7 @@ class TraceHelper:
 
     def predict(self, model: nn.Module, masking_prob=1, split=False, evaluate=True):
         target_type = model.target_type
-        hierarchical = model.model_type.startswith("macro")
-        if hierarchical:
-            macro_type = model.macro_type
+        macro_type = model.macro_type if model.model_type.startswith("macro") else None
 
         n_features = model.x_dim if target_type == "player_poss" else model.params["n_features"]
         n_input_players = 10 if target_type == "gk" else 11
@@ -227,14 +227,14 @@ class TraceHelper:
         elif target_type == "transition":
             micro_pred_df = pd.DataFrame(index=self.traces.index, columns=["transition"], dtype=float)
 
-        if hierarchical:
+        if macro_type is None:
+            macro_pred_df = None
+        else:
             macro_cols = ["A", "B"] if macro_type == "team_poss" else poss_labels
             macro_pred_df = pd.DataFrame(index=self.traces.index, columns=macro_cols, dtype=float)
-        else:
-            macro_pred_df = None
 
+        n_frames = 0
         if evaluate:
-            n_frames = 0
             sum_macro_acc = 0
             sum_micro_acc = 0
             sum_micro_pos_errors = 0
@@ -286,12 +286,11 @@ class TraceHelper:
                 episode_input = torch.FloatTensor(episode_traces[input_cols].values)
 
                 macro_target = None
-                if hierarchical:
-                    if macro_type == "team_poss":
-                        macro_target = torch.LongTensor((episode_traces["team_poss"] == team2_code).values)
-                    elif macro_type == "player_poss":
-                        player_poss = episode_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
-                        macro_target = torch.LongTensor(player_poss.map(poss_dict).values)
+                if macro_type == "team_poss":
+                    macro_target = torch.LongTensor((episode_traces["team_poss"] == team2_code).values)
+                elif macro_type == "player_poss":
+                    player_poss = episode_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
+                    macro_target = torch.LongTensor(player_poss.map(poss_dict).values)
 
                 micro_target = None
                 if target_type == "player_poss":
@@ -308,7 +307,9 @@ class TraceHelper:
                     except RuntimeError:
                         return episode_input, macro_target, micro_target
 
-                if hierarchical:
+                if macro_type is None:
+                    micro_pred = pred
+                else:
                     macro_pred = pred[:, :-2]
                     micro_pred = pred[:, -2:]
                     macro_pred_probs = nn.Softmax(dim=-1)(macro_pred).numpy()
@@ -317,8 +318,6 @@ class TraceHelper:
                         macro_pred_df.loc[episode_traces.index, team2_code] = macro_pred_probs[:, 1]
                     elif macro_type == "player_poss":
                         macro_pred_df.loc[episode_traces.index, macro_cols] = macro_pred_probs
-                else:
-                    micro_pred = pred
 
                 if target_type in ["team_poss", "player_poss", "transition"]:
                     micro_pred = nn.Softmax(dim=-1)(micro_pred)
@@ -328,14 +327,13 @@ class TraceHelper:
                 else:
                     micro_pred_df.loc[episode_traces.index, output_cols] = micro_pred.numpy()
 
+                n_frames += micro_pred.shape[0]
                 if evaluate:
-                    if hierarchical:
-                        assert macro_target is not None
-                        # macro_target = macro_target[10:-10]
-                        if macro_type == "team_poss":
-                            sum_macro_acc += ((macro_pred_probs[:, 1] > 0.5) == macro_target).astype(int).sum()
-                        elif macro_type == "player_poss":
-                            sum_macro_acc += calc_class_acc(macro_pred, macro_target, aggfunc="sum")
+                    # macro_target = macro_target[10:-10]
+                    if macro_type == "team_poss":
+                        sum_macro_acc += ((macro_pred_probs[:, 1] > 0.5) == macro_target).astype(int).sum()
+                    elif macro_type == "player_poss":
+                        sum_macro_acc += calc_class_acc(macro_pred, macro_target, aggfunc="sum")
 
                     assert micro_target is not None
                     # micro_target = micro_target[10:-10]
@@ -351,28 +349,35 @@ class TraceHelper:
                     elif target_type == "ball":
                         sum_micro_pos_errors += calc_trace_dist(micro_pred, micro_target, aggfunc="sum")
 
-                    n_frames += micro_pred.shape[0]
-
-            if hierarchical:
+            if macro_type is not None:
                 phase_macro_pred_df = macro_pred_df.loc[phase_traces.index]
                 macro_pred_df.loc[phase_traces.index] = phase_macro_pred_df.interpolate(limit_direction="both")
 
             phase_micro_pred_df = micro_pred_df.loc[phase_traces.index]
             micro_pred_df.loc[phase_traces.index] = phase_micro_pred_df.interpolate(limit_direction="both")
 
+        stats = {"n_frames": n_frames}
+        if n_frames == 0:
+            return None, None, stats
+
         if evaluate:
-            if n_frames == 0:
-                return None, None
-            if hierarchical:
+            if macro_type is not None:
+                stats["sum_acc"] = sum_macro_acc
                 print(f"macro_acc: {round(sum_macro_acc / n_frames, 4)}")
+
             if target_type.endswith("poss"):
+                stats["sum_acc"] = sum_micro_acc
                 print(f"micro_acc: {round(sum_micro_acc / n_frames, 4)}")
+
             elif target_type == "gk":
+                stats["sum_pos_errors"] = sum_micro_pos_errors / 2
                 print(f"micro_pos_error: {round(sum_micro_pos_errors / n_frames / 2, 4)}")
+
             elif target_type == "ball":
+                stats["sum_pos_errors"] = sum_micro_pos_errors
                 print(f"micro_pos_error: {round(sum_micro_pos_errors / n_frames, 4)}")
 
-        return macro_pred_df, micro_pred_df
+        return macro_pred_df, micro_pred_df, stats
 
     @staticmethod
     def plot_speeds_and_accels(traces: pd.DataFrame, players: list = None) -> animation.FuncAnimation:
