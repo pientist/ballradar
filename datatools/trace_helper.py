@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from dataset import SoccerDataset
 from models import PIVRNN, PlayerBall
-from models.utils import calc_class_acc, calc_trace_dist
+from models.utils import calc_class_acc, calc_real_loss, calc_trace_dist
 
 
 class TraceHelper:
@@ -235,9 +235,10 @@ class TraceHelper:
 
         n_frames = 0
         if evaluate:
-            sum_macro_acc = 0
-            sum_micro_acc = 0
-            sum_micro_pos_errors = 0
+            correct_team_poss = 0
+            correct_player_poss = 0
+            sum_pos_error = 0
+            sum_real_loss = 0
 
         for phase in self.traces["phase"].unique():
             if type(phase) == str:  # For GPS-event traces, ignore phases with n_players < 22
@@ -261,21 +262,21 @@ class TraceHelper:
             team2_cols = [c for c in input_cols if c.startswith(team2_code)]
             input_cols = team1_cols + team2_cols  # Reorder teams so that the left team comes first
 
-            if macro_type == "player_poss":
+            if macro_type == "player_poss" or target_type == "player_poss":
                 input_cols += [f"{label}{t}" for label in outside_labels for t in feature_types]
-                macro_cols = [c.split("_")[0] for c in input_cols[::n_features]]
+                team_poss_dict = {team1_code: 0, team2_code: 1, "O": 2, "G": 2}
 
-                poss_dict = dict(zip(macro_cols, np.arange(len(macro_cols))))
-                poss_dict["GOAL-L"] = len(macro_cols) - 4  # same as OUT-L
-                poss_dict["GOAL-R"] = len(macro_cols) - 3  # same as OUT-R
+                if macro_type == "player_poss":
+                    macro_cols = [c.split("_")[0] for c in input_cols[::n_features]]
+                    player_poss_dict = dict(zip(macro_cols, np.arange(len(macro_cols))))
+                    player_poss_dict["GOAL-L"] = len(macro_cols) - 4  # same as OUT-L
+                    player_poss_dict["GOAL-R"] = len(macro_cols) - 3  # same as OUT-R
 
-            if target_type == "player_poss":
-                input_cols += [f"{label}{t}" for label in outside_labels for t in feature_types]
-                output_cols = [c.split("_")[0] for c in input_cols[::n_features]]
-
-                poss_dict = dict(zip(output_cols, np.arange(len(output_cols))))
-                poss_dict["GOAL-L"] = len(output_cols) - 4  # same as OUT-L
-                poss_dict["GOAL-R"] = len(output_cols) - 3  # same as OUT-R
+                if target_type == "player_poss":
+                    output_cols = [c.split("_")[0] for c in input_cols[::n_features]]
+                    player_poss_dict = dict(zip(output_cols, np.arange(len(output_cols))))
+                    player_poss_dict["GOAL-L"] = len(output_cols) - 4  # same as OUT-L
+                    player_poss_dict["GOAL-R"] = len(output_cols) - 3  # same as OUT-R
 
             if min(len(team1_cols), len(team2_cols)) < n_features * n_input_players:
                 continue
@@ -290,12 +291,12 @@ class TraceHelper:
                     macro_target = torch.LongTensor((episode_traces["team_poss"] == team2_code).values)
                 elif macro_type == "player_poss":
                     player_poss = episode_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
-                    macro_target = torch.LongTensor(player_poss.map(poss_dict).values)
+                    macro_target = torch.LongTensor(player_poss.map(player_poss_dict).values)
 
                 micro_target = None
                 if target_type == "player_poss":
                     player_poss = episode_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
-                    micro_target = torch.LongTensor(player_poss.map(poss_dict).values)
+                    micro_target = torch.LongTensor(player_poss.map(player_poss_dict).values)
                 elif target_type in ["gk", "ball"]:
                     micro_target = torch.FloatTensor(episode_traces[output_cols].values)
 
@@ -331,23 +332,34 @@ class TraceHelper:
                 if evaluate:
                     # macro_target = macro_target[10:-10]
                     if macro_type == "team_poss":
-                        sum_macro_acc += ((macro_pred_probs[:, 1] > 0.5) == macro_target).astype(int).sum()
+                        correct_team_poss += ((macro_pred_probs[:, 1] > 0.5) == macro_target).astype(int).sum()
+
                     elif macro_type == "player_poss":
-                        sum_macro_acc += calc_class_acc(macro_pred, macro_target, aggfunc="sum")
+                        team_poss_pred = np.argmax(macro_pred.numpy(), axis=1) // 11
+                        team_poss_target = player_poss.apply(lambda x: x[0]).map(team_poss_dict)
+                        correct_team_poss += (team_poss_pred == team_poss_target).sum()
+                        correct_player_poss += calc_class_acc(macro_pred, macro_target, aggfunc="sum")
 
                     assert micro_target is not None
                     # micro_target = micro_target[10:-10]
+
                     if target_type == "player_poss":
-                        sum_micro_acc += calc_class_acc(micro_pred, micro_target, aggfunc="sum")
+                        team_poss_pred = np.argmax(micro_pred.numpy(), axis=1) // 11
+                        team_poss_target = player_poss.apply(lambda x: x[0]).map(team_poss_dict)
+                        correct_team_poss += (team_poss_pred == team_poss_target).sum()
+                        correct_player_poss += calc_class_acc(micro_pred, micro_target, aggfunc="sum")
+
                     elif target_type == "gk":
                         team1_gk_pred = micro_pred[:, 0:2]
                         team2_gk_pred = micro_pred[:, 2:4]
                         team1_gk_target = micro_target[:, 0:2]
                         team2_gk_target = micro_target[:, 2:4]
-                        sum_micro_pos_errors += calc_trace_dist(team1_gk_pred, team1_gk_target, aggfunc="sum")
-                        sum_micro_pos_errors += calc_trace_dist(team2_gk_pred, team2_gk_target, aggfunc="sum")
+                        sum_pos_error += calc_trace_dist(team1_gk_pred, team1_gk_target, aggfunc="sum")
+                        sum_pos_error += calc_trace_dist(team2_gk_pred, team2_gk_target, aggfunc="sum")
+
                     elif target_type == "ball":
-                        sum_micro_pos_errors += calc_trace_dist(micro_pred, micro_target, aggfunc="sum")
+                        sum_pos_error += calc_trace_dist(micro_pred, micro_target, aggfunc="sum")
+                        sum_real_loss += calc_real_loss(micro_pred, episode_input, aggfunc="sum").item()
 
             if macro_type is not None:
                 phase_macro_pred_df = macro_pred_df.loc[phase_traces.index]
@@ -361,21 +373,23 @@ class TraceHelper:
             return None, None, stats
 
         if evaluate:
-            if macro_type is not None:
-                stats["sum_acc"] = sum_macro_acc
-                print(f"macro_acc: {round(sum_macro_acc / n_frames, 4)}")
+            if correct_team_poss > 0:
+                stats["correct_team_poss"] = correct_team_poss
+                print(f"team_poss_acc: {round(correct_team_poss / n_frames, 4)}")
 
-            if target_type.endswith("poss"):
-                stats["sum_acc"] = sum_micro_acc
-                print(f"micro_acc: {round(sum_micro_acc / n_frames, 4)}")
+            if correct_player_poss > 0:
+                stats["correct_player_poss"] = correct_player_poss
+                print(f"player_poss_acc: {round(correct_player_poss / n_frames, 4)}")
 
-            elif target_type == "gk":
-                stats["sum_pos_errors"] = sum_micro_pos_errors / 2
-                print(f"micro_pos_error: {round(sum_micro_pos_errors / n_frames / 2, 4)}")
+            if target_type == "gk":
+                stats["sum_pos_error"] = sum_pos_error / 2
+                print(f"pos_error: {round(sum_pos_error / n_frames / 2, 4)}")
 
             elif target_type == "ball":
-                stats["sum_pos_errors"] = sum_micro_pos_errors
-                print(f"micro_pos_error: {round(sum_micro_pos_errors / n_frames, 4)}")
+                stats["sum_pos_error"] = sum_pos_error
+                stats["sum_real_loss"] = sum_real_loss
+                print(f"pos_error: {round(sum_pos_error / n_frames, 4)}")
+                print(f"real_loss: {round(sum_real_loss / n_frames, 4)}")
 
         return macro_pred_df, micro_pred_df, stats
 

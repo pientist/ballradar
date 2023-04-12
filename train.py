@@ -147,8 +147,8 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
                 with torch.no_grad():
                     out = model(input, macro_target, micro_target)
 
-            micro_out_dim = model.module.micro_out_dim  # 4 if target_type == "gk" else 2
-            macro_out = out[:, :, :-micro_out_dim].transpose(1, 2)
+            micro_dim = model.module.micro_dim  # 4 if target_type == "gk" else 2
+            macro_out = out[:, :, :-micro_dim].transpose(1, 2)
             macro_weight = model.module.params["macro_weight"]
             macro_loss = nn.CrossEntropyLoss()(macro_out, macro_target) * macro_weight
 
@@ -156,7 +156,7 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
                 loss_dict["ce_loss"] += [macro_loss.item()]
                 loss_dict["macro_acc"] += [calc_class_acc(macro_out, macro_target)]
 
-                micro_out = out[:, :, -micro_out_dim:].transpose(1, 2)
+                micro_out = out[:, :, -micro_dim:].transpose(1, 2)
                 micro_loss = nn.CrossEntropyLoss()(micro_out, micro_target)
                 loss = macro_loss + micro_loss
 
@@ -167,7 +167,7 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
                 loss_dict["ce_loss"] += [macro_loss.item()]
                 loss_dict["accuracy"] += [calc_class_acc(macro_out, macro_target)]
 
-                micro_out = out[:, :, -micro_out_dim:]
+                micro_out = out[:, :, -micro_dim:]
                 if "speed_loss" in model.module.params and model.module.params["speed_loss"]:
                     micro_out = calc_speed(micro_out)
 
@@ -236,7 +236,8 @@ parser.add_argument("--pretrain_time", type=int, required=False, default=0, help
 parser.add_argument("--seed", type=int, required=False, default=128, help="PyTorch random seed")
 parser.add_argument("--cuda", action="store_true", default=False, help="use GPU")
 parser.add_argument("--cont", action="store_true", default=False, help="continue training previous best model")
-parser.add_argument("--best_loss", type=float, required=False, default=0, help="best test loss")
+parser.add_argument("--best_total_loss", type=float, required=False, default=0, help="best total loss")
+parser.add_argument("--best_pos_error", type=float, required=False, default=0, help="best position error")
 
 args, _ = parser.parse_known_args()
 
@@ -263,7 +264,8 @@ if __name__ == "__main__":
         "min_lr": args.min_lr,
         "seed": args.seed,
         "cuda": args.cuda,
-        "best_loss": args.best_loss,
+        "best_total_loss": args.best_total_loss,
+        "best_pos_error": args.best_pos_error,
     }
 
     # Hyperparameters
@@ -381,8 +383,8 @@ if __name__ == "__main__":
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, num_workers=nw, pin_memory=True)
 
     # Train loop
-    best_total_loss = args.best_loss
-    best_pos_error = 0
+    best_total_loss = args.best_total_loss
+    best_pos_error = args.best_pos_error
     epochs_since_best = 0
     lr = max(args.start_lr, args.min_lr)
 
@@ -426,16 +428,15 @@ if __name__ == "__main__":
         # Best model on test set
         if best_total_loss == 0 or test_total_loss < best_total_loss:
             best_total_loss = test_total_loss
-            best_pos_error = test_losses["pos_error"]
             epochs_since_best = 0
 
             path = "{}/model/{}_state_dict_best.pt".format(save_path, args.model)
             if epoch <= pretrain_time:
                 path = "{}/model/{}_state_dict_best_pretrain.pt".format(save_path, args.model)
             torch.save(model.module.state_dict(), path)
-            printlog("########### Best Loss ###########")
+            printlog("######## Best Total Loss ########")
 
-        elif "pos_error" in test_losses and test_losses["pos_error"] < best_pos_error:
+        if "pos_error" in test_losses and (best_pos_error == 0 or test_losses["pos_error"] < best_pos_error):
             best_pos_error = test_losses["pos_error"]
             epochs_since_best = 0
 

@@ -109,8 +109,12 @@ def calc_speed(xy):
     return torch.stack([x, y, speed], -1)
 
 
-def calc_real_loss(pred_xy, input_features, n_features=6, eps=torch.tensor(1e-6)):
+def calc_real_loss(pred_xy, input, n_features=6, eps=torch.tensor(1e-6), aggfunc="mean"):
     eps = eps.to(pred_xy.device)
+    if len(pred_xy.shape) == 2:
+        pred_xy = pred_xy.unsqueeze(0).clone()
+    if len(input.shape) == 2:
+        input = input.unsqueeze(0).clone()
 
     # Calculate the angle between two consecutive velocity vectors
     # We skip the division by time difference, which is eventually reduced
@@ -123,14 +127,17 @@ def calc_real_loss(pred_xy, input_features, n_features=6, eps=torch.tensor(1e-6)
 
     # Compute the distance between the ball and the nearest player
     pred_xy = torch.unsqueeze(pred_xy, dim=2)
-    player_x = input_features[:, :, 0 : n_features * 22 : n_features]
-    player_y = input_features[:, :, 1 : n_features * 22 : n_features]
+    player_x = input[:, :, 0 : n_features * 22 : n_features]
+    player_y = input[:, :, 1 : n_features * 22 : n_features]
     player_xy = torch.stack([player_x, player_y], dim=-1)
     ball_dists = torch.linalg.norm(pred_xy - player_xy, dim=-1)
     nearest_dists = torch.min(ball_dists, dim=-1).values[:, 1:-1]
 
     # Either course angle must be close to 0 or the ball must be close to a player
-    return (torch.tanh(angles) * nearest_dists).mean()
+    if aggfunc == "mean":
+        return (torch.tanh(angles) * nearest_dists).mean()
+    else:  # if aggfunc == "sum"
+        return (torch.tanh(angles) * nearest_dists).sum()
 
 
 def calc_trace_dist(pred_xy, target_xy, aggfunc="mean"):
