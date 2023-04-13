@@ -67,7 +67,7 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
         loss_dict = {"kld_loss": [], "recon_loss": [], "pos_error": []}
 
     elif model.module.model_type == "macro_classifier":
-        loss_dict = {"ce_loss": [], "micro_ce_loss": [], "macro_acc": [], "micro_acc": []}
+        loss_dict = {"macro_ce_loss": [], "micro_ce_loss": [], "macro_acc": [], "micro_acc": []}
 
     elif model.module.model_type == "macro_regressor":
         if "rloss_weight" in model.module.params and model.module.params["rloss_weight"] > 0:
@@ -106,14 +106,14 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
             loss = nn.MSELoss()(out, target)
             loss_dict["mse_loss"] += [loss.item()]
 
+            n_features = model.module.params["n_features"]
+            real_loss = calc_real_loss(out[:, :, 0:2], input, n_features)
             if "rloss_weight" in model.module.params:
                 rloss_weight = model.module.params["rloss_weight"]
                 if rloss_weight > 0:
-                    n_features = model.module.params["n_features"]
-                    real_loss = calc_real_loss(out[:, :, 0:2], input, n_features) * rloss_weight
-                    loss_dict["real_loss"] += [real_loss.item()]
-                    loss += real_loss
+                    loss += real_loss * rloss_weight
 
+            loss_dict["real_loss"] += [real_loss.item()]
             if model.module.target_type == "gk":
                 team1_pos_error = calc_trace_dist(out[:, :, 0:2], target[:, :, 0:2])
                 team2_pos_error = calc_trace_dist(out[:, :, 2:4], target[:, :, 2:4])
@@ -125,14 +125,15 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
             input = data[0].to(default_device)
             target = data[1].to(default_device)
 
+            kld_weight = model.module.params["kld_weight"]
             if train:
                 loss_tensor = model(input, target).mean(0)
-                loss = loss_tensor[0] + loss_tensor[1]  # kld_loss + recon_loss
+                loss = loss_tensor[0] * kld_weight + loss_tensor[1]  # kld_loss + recon_loss
             else:
                 with torch.no_grad():
                     loss_tensor = model(input, target).mean(0)
 
-            loss_dict["kld_loss"] += [loss_tensor[0].item()]
+            loss_dict["kld_loss"] += [loss_tensor[0].item() * kld_weight]
             loss_dict["recon_loss"] += [loss_tensor[1].item()]
             loss_dict["pos_error"] += [loss_tensor[2].item()]
 
@@ -153,35 +154,34 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
             macro_loss = nn.CrossEntropyLoss()(macro_out, macro_target) * macro_weight
 
             if model.module.model_type == "macro_classifier":
-                loss_dict["ce_loss"] += [macro_loss.item()]
-                loss_dict["macro_acc"] += [calc_class_acc(macro_out, macro_target)]
-
                 micro_out = out[:, :, -micro_dim:].transpose(1, 2)
                 micro_loss = nn.CrossEntropyLoss()(micro_out, micro_target)
                 loss = macro_loss + micro_loss
 
+                loss_dict["macro_ce_loss"] += [macro_loss.item()]
                 loss_dict["micro_ce_loss"] += [micro_loss.item()]
+                loss_dict["macro_acc"] += [calc_class_acc(macro_out, macro_target)]
                 loss_dict["micro_acc"] += [calc_class_acc(micro_out, micro_target)]
 
             else:  # model.module.model_type == "macro_regressor"
-                loss_dict["ce_loss"] += [macro_loss.item()]
-                loss_dict["accuracy"] += [calc_class_acc(macro_out, macro_target)]
-
                 micro_out = out[:, :, -micro_dim:]
                 if "speed_loss" in model.module.params and model.module.params["speed_loss"]:
                     micro_out = calc_speed(micro_out)
-
                 micro_loss = nn.MSELoss()(micro_out, micro_target)
+
+                n_features = model.module.params["n_features"]
+                real_loss = calc_real_loss(micro_out[:, :, 0:2], input, n_features)
+
                 loss = macro_loss + micro_loss
                 if "rloss_weight" in model.module.params:
                     rloss_weight = model.module.params["rloss_weight"]
                     if rloss_weight > 0:
-                        n_features = model.module.params["n_features"]
-                        real_loss = calc_real_loss(micro_out[:, :, 0:2], input, n_features) * rloss_weight
-                        loss_dict["real_loss"] += [real_loss.item()]
-                        loss += real_loss
+                        loss += real_loss * rloss_weight
 
+                loss_dict["ce_loss"] += [macro_loss.item()]
                 loss_dict["mse_loss"] += [micro_loss.item()]
+                loss_dict["real_loss"] += [real_loss.item()]
+                loss_dict["accuracy"] += [calc_class_acc(macro_out, macro_target)]
                 if model.module.target_type == "gk":
                     team1_pos_error = calc_trace_dist(micro_out[:, :, 0:2], micro_target[:, :, 0:2])
                     team2_pos_error = calc_trace_dist(micro_out[:, :, 2:4], micro_target[:, :, 2:4])
@@ -211,8 +211,9 @@ parser.add_argument("-t", "--trial", type=int, required=True)
 parser.add_argument("--model", type=str, required=True, default="player_ball")
 parser.add_argument("--macro_type", type=str, required=False, default="team_poss", help="type of macro-intents")
 parser.add_argument("--target_type", type=str, required=False, default="ball", help="gk, ball, or team_poss")
-parser.add_argument("--macro_weight", type=float, required=False, default=50, help="weight for the macro-intent loss")
+parser.add_argument("--macro_weight", type=float, required=False, default=20, help="weight for the macro-intent loss")
 parser.add_argument("--rloss_weight", type=float, required=False, default=0, help="weight for the reality loss")
+parser.add_argument("--kld_weight", type=float, required=False, default=1, help="weight for the KLD loss in VRNN")
 parser.add_argument("--speed_loss", action="store_true", default=False, help="include speed loss in MSE")
 parser.add_argument("--masking", type=float, required=False, default=1, help="masking proportion of the target")
 parser.add_argument("--prev_out_aware", action="store_true", default=False, help="make RNN refer to previous outputs")
@@ -253,6 +254,7 @@ if __name__ == "__main__":
         "target_type": args.target_type,
         "macro_weight": args.macro_weight,
         "rloss_weight": args.rloss_weight,
+        "kld_weight": args.kld_weight,
         "speed_loss": args.speed_loss,
         "masking": args.masking,
         "prev_out_aware": args.prev_out_aware,
@@ -299,7 +301,7 @@ if __name__ == "__main__":
 
     # Continue a previous experiment, or start a new one
     if args.cont:
-        state_dict = torch.load("{}/model/{}_state_dict_best.pt".format(save_path, args.model))
+        state_dict = torch.load("{}/model/{}_state_dict_best_pe.pt".format(save_path, args.model))
         model.module.load_state_dict(state_dict)
     else:
         if args.model.endswith("lstm"):  # nonhierarchical models
@@ -394,7 +396,7 @@ if __name__ == "__main__":
         hyperparams = {"pretrain": epoch <= pretrain_time}
 
         # Set a custom learning rate schedule
-        if epochs_since_best == 2 and lr > args.min_lr:
+        if epochs_since_best == 3 and lr > args.min_lr:
             # Load previous best model
             path = "{}/model/{}_state_dict_best.pt".format(save_path, args.model)
             if epoch <= pretrain_time:
@@ -402,7 +404,7 @@ if __name__ == "__main__":
             state_dict = torch.load(path)
 
             # Decrease learning rate
-            lr = max(lr / 2, args.min_lr)
+            lr = max(lr * 0.5, args.min_lr)
             printlog("########## lr {} ##########".format(lr))
             epochs_since_best = 0
         else:

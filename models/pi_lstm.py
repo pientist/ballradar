@@ -24,7 +24,6 @@ class PILSTM(nn.Module):
         n_features = params["n_features"]  # number of features per player (6 in general)
         context_dim = params["context_dim"]
         rnn_dim = params["rnn_dim"]
-        n_layers = params["n_layers"]
         dropout = params["dropout"] if "dropout" in params else 0
 
         self.team1_st = SetTransformer(in_dim=n_features, out_dim=context_dim)
@@ -34,7 +33,7 @@ class PILSTM(nn.Module):
         self.rnn = nn.LSTM(
             input_size=context_dim,
             hidden_size=rnn_dim,
-            num_layers=n_layers,
+            num_layers=2,
             dropout=dropout,
             bidirectional=params["bidirectional"],
         )
