@@ -18,7 +18,7 @@ class Postprocessor:
         self.poss_scores = pd.DataFrame(index=self.traces.index, columns=pred_poss.columns, dtype=float)
         self.carry_records = None
 
-        output_cols = ["carrier", "ball_x", "ball_y", "focus_x", "focus_y"]
+        output_cols = ["carrier", "player_poss", "ball_x", "ball_y", "focus_x", "focus_y"]
         self.output = pd.DataFrame(index=self.traces.index, columns=output_cols)
         self.output[output_cols[1:]] = self.output[output_cols[1:]].astype(float)
 
@@ -267,8 +267,8 @@ class Postprocessor:
     def run(self, method="ball_accel", max_accel=5, thres_touch=0.2, thres_carry=0.5, evaluate=False):
         if evaluate:
             n_frames = 0
-            sum_macro_acc = 0
-            sum_micro_pos_errors = 0
+            correct_player_poss = 0
+            sum_pos_error = 0
 
         carry_records_list = []
 
@@ -302,12 +302,12 @@ class Postprocessor:
 
                         ep_target_poss = ep_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
                         ep_output_poss = ep_output["carrier"].fillna(method="bfill").fillna(method="ffill")
-                        sum_macro_acc += (ep_target_poss == ep_output_poss).astype(int).sum()
+                        correct_player_poss += (ep_target_poss == ep_output_poss).astype(int).sum()
 
                         ep_target_traces = self.target_traces.loc[ep_traces.index]
                         error_x = (ep_output["ball_x"] - ep_target_traces["ball_x"]).values
                         error_y = (ep_output["ball_y"] - ep_target_traces["ball_y"]).values
-                        sum_micro_pos_errors += np.sqrt((error_x**2 + error_y**2).astype(float)).sum()
+                        sum_pos_error += np.sqrt((error_x**2 + error_y**2).astype(float)).sum()
 
                 self.output.loc[phase_traces.index, ["ball_x", "ball_y", "focus_x", "focus_y"]] = self.output.loc[
                     phase_traces.index, ["ball_x", "ball_y", "focus_x", "focus_y"]
@@ -336,21 +336,22 @@ class Postprocessor:
 
                         ep_target_poss = ep_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
                         ep_output_poss = ep_output["carrier"].fillna(method="bfill").fillna(method="ffill")
-                        sum_macro_acc += (ep_target_poss == ep_output_poss).astype(int).sum()
+                        self.output.loc[ep_traces.index, "player_poss"] = ep_output_poss
+                        correct_player_poss += (ep_target_poss == ep_output_poss).astype(int).sum()
 
                         ep_target_traces = self.target_traces.loc[ep_traces.index]
                         error_x = (ep_output["ball_x"] - ep_target_traces["ball_x"]).values
                         error_y = (ep_output["ball_y"] - ep_target_traces["ball_y"]).values
-                        sum_micro_pos_errors += np.sqrt((error_x**2 + error_y**2).astype(float)).sum()
+                        sum_pos_error += np.sqrt((error_x**2 + error_y**2).astype(float)).sum()
 
         self.carry_records = pd.concat(carry_records_list)
 
         if evaluate and n_frames > 0:
-            print(f"macro_acc: {round(sum_macro_acc / n_frames, 4)}")
-            print(f"micro_pos_error: {round(sum_micro_pos_errors / n_frames, 4)}")
+            print(f"player_poss_acc: {round(correct_player_poss / n_frames, 4)}")
+            print(f"pos_error: {round(sum_pos_error / n_frames, 4)}")
 
     @staticmethod
-    def plot_speeds_and_accels(times: pd.Series, ball_traces: pd.DataFrame, carry_records: pd.DataFrame):
+    def plot_speed_and_accel_curves(times: pd.Series, ball_traces: pd.DataFrame, carry_records: pd.DataFrame):
         fig, axes = plt.subplots(2, 1)
         fig.set_facecolor("w")
         fig.set_size_inches(15, 10)
@@ -376,48 +377,126 @@ class Postprocessor:
         axes[1].grid()
 
     @staticmethod
-    def plot_poss_values(
-        times: pd.Series,
+    def detect_false_poss_segments(pred_poss, true_poss):
+        false_idxs = true_poss[true_poss != pred_poss].reset_index()["index"]
+        time_diffs = pd.Series(false_idxs.diff().fillna(10).values, index=false_idxs)
+        segment_ids = (time_diffs > 3).astype(int).cumsum().rename("segment_id").reset_index()
+
+        start_idxs = segment_ids.groupby("segment_id")["index"].first().rename("start_idx")
+        end_idxs = segment_ids.groupby("segment_id")["index"].last().rename("end_idx")
+        false_segments = pd.concat([start_idxs, end_idxs], axis=1)
+
+        false_segments["miss"] = False
+        false_segments["false_alarm"] = False
+
+        for i in false_segments.index:
+            i0 = false_segments.at[i, "start_idx"]
+            i1 = false_segments.at[i, "end_idx"]
+
+            true_players = true_poss.loc[i0:i1].unique()
+            pred_players = pred_poss.loc[i0:i1].unique()
+            true_players_ext = true_poss.loc[i0 - 10 : i1 + 10].unique()
+            pred_players_ext = pred_poss.loc[i0 - 10 : i1 + 10].unique()
+
+            false_segments.at[i, "miss"] = len(set(true_players) - set(pred_players_ext)) != 0
+            false_segments.at[i, "false_alarm"] = len(set(pred_players) - set(true_players_ext)) != 0
+
+        return false_segments
+
+    @staticmethod
+    def plot_poss_and_error_curves(
+        traces: pd.DataFrame,
         poss_scores: pd.DataFrame,
-        valid_players=None,
-        valid_score=0,
-        carry_records=None,
-        ylabel="Possession score",
-        save_filename=None,
-    ):
-        plt.rcParams.update({"font.size": 18})
-        plt.figure(figsize=(15, 5))
+        pp_output: pd.DataFrame = None,
+    ) -> animation.FuncAnimation:
+        FRAME_DUR = 30
+        MAX_DIST = 20
 
-        if valid_players is None:
-            valid_players = poss_scores.max()[poss_scores.max() > valid_score].index
+        nn_pos_error_xy = traces[["ball_x", "ball_y"]] - traces[["pred_ball_x", "pred_ball_y"]].values
+        nn_pos_errors = nn_pos_error_xy.apply(np.linalg.norm, axis=1)
+        if pp_output is not None:
+            pp_pos_error_xy = traces[["ball_x", "ball_y"]] - pp_output[["ball_x", "ball_y"]].values
+            pp_pos_errors = pp_pos_error_xy.apply(np.linalg.norm, axis=1)
 
-        cmap = "tab10" if len(valid_players) <= 10 else "tab20"
-        color_dict = dict(zip(valid_players, plt.cm.get_cmap(cmap).colors))
+        poss_cols = [p for p in poss_scores.dropna(axis=1).columns if p[0] in ["A", "B", "O"]]
+        poss_dict = dict(zip(poss_cols, np.arange(len(poss_cols))))
+        poss_dict["GOAL-L"] = len(poss_cols) - 4
+        poss_dict["GOAL-R"] = len(poss_cols) - 3
 
-        # times = poss_scores.index.values / 10
-        for p in valid_players:
-            plt.plot(times, poss_scores[p], label=p, color=color_dict[p])
+        true_poss = traces["player_poss"].fillna(method="bfill").fillna(method="ffill").map(poss_dict)
+        nn_pred_poss = traces["pred_poss"].map(poss_dict)
+        false_segments = Postprocessor.detect_false_poss_segments(nn_pred_poss, true_poss)
+        if pp_output is not None:
+            pp_pred_poss = pp_output["player_poss"].fillna(method="bfill").fillna(method="ffill").map(poss_dict)
 
-        if carry_records is not None:
-            for i in carry_records.index:
-                start_time = times.at[carry_records.at[i, "start_idx"]]
-                end_time = times.at[carry_records.at[i, "end_idx"]]
+        fig, axes = plt.subplots(3, 1)
+        fig.subplots_adjust(left=0.1, bottom=0.05, right=0.95, top=0.98, wspace=0, hspace=0.05)
+        fig.set_size_inches(15, 20)
+        plt.rcParams.update({"font.size": 15})
 
-                if "carrier" in carry_records.columns:
-                    carrier = carry_records.at[i, "carrier"]
-                    color = color_dict[carrier]
-                else:
-                    color = "gray"
+        times = traces["time"].values
+        t0 = int(times[0] - 0.1)
 
-                plt.axvspan(start_time, end_time, alpha=0.5, color=color)
+        axes[0].plot(times, true_poss, color="tab:blue", marker="o", label="True")
+        axes[0].plot(times, nn_pred_poss, color="orangered", marker="o", label="NN output")
+        if pp_output is not None:
+            axes[0].plot(times, pp_pred_poss, color="darkgreen", marker="o", label="PP output")
 
-        xmin = (times.iloc[0] // 5) * 5
-        plt.xlim(xmin, xmin + 40)
-        plt.ylim(0, 1.05)
-        plt.xlabel("Time [s]")
-        plt.ylabel(ylabel)
-        plt.grid()
-        plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left", borderaxespad=0)
+        axes[0].set(xlim=(t0, t0 + FRAME_DUR), ylim=(-1, len(poss_cols)))
+        axes[0].set_xticklabels([])
+        axes[0].set_yticks(ticks=np.arange(len(poss_cols)), labels=poss_cols)
+        axes[0].set_ylabel("Ball possessor", fontdict={"size": 20})
+        axes[0].grid()
+        axes[0].legend(loc="upper right")
 
-        if save_filename is not None:
-            plt.savefig(f"img/{save_filename}.png", bbox_inches="tight")
+        n_players = (len(poss_cols) - 4) // 2
+        base_cmaps = ["hot_r", "winter_r", "Greys_r"]
+        colors = np.concatenate([plt.get_cmap(name)(np.linspace(0.1, 0.9, n_players)) for name in base_cmaps])
+        poss_cols = poss_cols[:n_players] + poss_cols[-4:-2] + poss_cols[n_players:-4] + poss_cols[-2:]
+        for p in poss_cols:
+            axes[1].plot(times, poss_scores[p], label=p, color=colors[poss_dict[p]])
+
+        axes[1].set(xlim=(t0, t0 + FRAME_DUR), ylim=(0, 1.05))
+        axes[1].set_xticklabels([])
+        axes[1].set_ylabel("Possession probability", fontdict={"size": 20})
+        axes[1].grid(which="major", axis="both")
+        axes[1].legend(loc="upper right", ncols=2)
+
+        axes[2].plot(times, nn_pos_errors, color="orangered", label="NN output")
+        if pp_output is not None:
+            axes[2].plot(times, pp_pos_errors, color="tab:green", label="PP output")
+            axes[2].legend(loc="upper right")
+
+        axes[2].set(xlim=(t0, t0 + FRAME_DUR), ylim=(0, MAX_DIST))
+        axes[2].set_xlabel("Time [s]", fontdict={"size": 20})
+        axes[2].set_ylabel("Position error", fontdict={"size": 20})
+        axes[2].grid()
+
+        for i in tqdm(false_segments.index):
+            start_time = traces.at[false_segments.at[i, "start_idx"], "time"] - 0.05
+            end_time = traces.at[false_segments.at[i, "end_idx"], "time"] + 0.05
+
+            miss = false_segments.at[i, "miss"]
+            false_alarm = false_segments.at[i, "false_alarm"]
+            if miss and false_alarm:
+                color = "red"
+            elif miss:
+                color = "tab:blue"
+            elif false_alarm:
+                color = "tab:orange"
+            else:
+                color = "grey"
+
+            axes[0].axvspan(start_time, end_time, alpha=0.3, color=color)
+            axes[1].axvspan(start_time, end_time, alpha=0.3, color=color)
+            axes[2].axvspan(start_time, end_time, alpha=0.3, color=color)
+
+        def animate(i):
+            for ax in axes:
+                ax.set_xlim(10 * i, 10 * i + FRAME_DUR)
+
+        frames = (len(traces) - 10 * FRAME_DUR) // 100 + 1
+        anim = animation.FuncAnimation(fig, animate, frames=frames, interval=500)
+        plt.close(fig)
+
+        return anim

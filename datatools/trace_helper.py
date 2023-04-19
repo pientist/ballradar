@@ -368,6 +368,13 @@ class TraceHelper:
             phase_micro_pred_df = micro_pred_df.loc[phase_traces.index]
             micro_pred_df.loc[phase_traces.index] = phase_micro_pred_df.interpolate(limit_direction="both")
 
+        argmax_idxs = np.argpartition(-macro_pred_df.values, range(3), axis=1)[:, :3]
+        player_poss_top3 = pd.DataFrame(np.array(macro_pred_df.columns)[argmax_idxs])
+        self.traces["pred_poss"] = macro_pred_df.idxmax(axis=1)
+        self.traces["pred_poss_top3"] = player_poss_top3.apply(lambda x: x.tolist(), axis=1)
+        self.traces["pred_ball_x"] = micro_pred_df["ball_x"]
+        self.traces["pred_ball_y"] = micro_pred_df["ball_y"]
+
         stats = {"n_frames": n_frames}
         if n_frames == 0:
             return None, None, stats
@@ -394,7 +401,7 @@ class TraceHelper:
         return macro_pred_df, micro_pred_df, stats
 
     @staticmethod
-    def plot_speeds_and_accels(traces: pd.DataFrame, players: list = None) -> animation.FuncAnimation:
+    def plot_speed_and_accel_curves(traces: pd.DataFrame, players: list = None) -> animation.FuncAnimation:
         FRAME_DUR = 30
         MAX_SPEED = 40
         MAX_ACCEL = 6
