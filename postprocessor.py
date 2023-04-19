@@ -7,15 +7,11 @@ from tqdm import tqdm
 
 
 class Postprocessor:
-    def __init__(self, traces: pd.DataFrame, pred_poss: pd.DataFrame, pred_traces: pd.DataFrame):
-        self.pred_poss = pred_poss.dropna(axis=0, how="all").copy()
-        self.pred_traces = pred_traces.loc[self.pred_poss.index, ["ball_x", "ball_y"]].copy()
-        self.traces = traces.loc[self.pred_poss.index].copy()
+    def __init__(self, traces: pd.DataFrame, poss_probs: pd.DataFrame):
+        self.poss_probs = poss_probs.dropna(axis=0, how="all").copy()
+        self.traces = traces.loc[self.poss_probs.index].copy()
 
-        self.pred_traces["time"] = self.traces["time"]
-        self.target_traces = self.traces[["ball_x", "ball_y"]] if "ball_x" in traces.columns else None
-
-        self.poss_scores = pd.DataFrame(index=self.traces.index, columns=pred_poss.columns, dtype=float)
+        self.poss_scores = pd.DataFrame(index=self.traces.index, columns=poss_probs.columns, dtype=float)
         self.carry_records = None
 
         output_cols = ["carrier", "player_poss", "ball_x", "ball_y", "focus_x", "focus_y"]
@@ -27,11 +23,11 @@ class Postprocessor:
         W_LEN = 7
         P_ORDER = 2
 
-        ball_traces = ball_traces.dropna(subset=["ball_x"])
+        ball_traces = ball_traces.dropna(subset=["pred_ball_x"])
         times = ball_traces["time"].values
 
-        x = ball_traces["ball_x"].values
-        y = ball_traces["ball_y"].values
+        x = ball_traces["pred_ball_x"].values
+        y = ball_traces["pred_ball_y"].values
         x = signal.savgol_filter(x, window_length=W_LEN, polyorder=P_ORDER)
         y = signal.savgol_filter(y, window_length=W_LEN, polyorder=P_ORDER)
 
@@ -51,19 +47,19 @@ class Postprocessor:
         return pd.DataFrame(ball_traces_arr, index=ball_traces.index, columns=cols)
 
     @staticmethod
-    def calc_ball_dists(player_traces: pd.DataFrame, ball_traces: pd.DataFrame, players: list) -> pd.DataFrame:
+    def calc_ball_dists(traces: pd.DataFrame, players: list) -> pd.DataFrame:
         # Calculate distances from the ball to the players
         player_xy_cols = [f"{p}{t}" for p in players for t in ["_x", "_y"]]
-        player_xy = player_traces[player_xy_cols].values.reshape(player_traces.shape[0], -1, 2)
-        pred_xy = ball_traces[["ball_x", "ball_y"]].values[:, np.newaxis, :]
+        player_xy = traces[player_xy_cols].values.reshape(traces.shape[0], -1, 2)
+        pred_xy = traces[["pred_ball_x", "pred_ball_y"]].values[:, np.newaxis, :]
         ball_dists = np.linalg.norm(pred_xy - player_xy, axis=-1)
-        ball_dists = pd.DataFrame(ball_dists, index=player_traces.index, columns=players)
+        ball_dists = pd.DataFrame(ball_dists, index=traces.index, columns=players)
 
         # Calculate distances from the ball to the pitch lines
-        ball_dists["OUT-L"] = (player_traces["OUT-L_x"] - ball_traces["ball_x"]).abs()
-        ball_dists["OUT-R"] = (player_traces["OUT-R_x"] - ball_traces["ball_x"]).abs()
-        ball_dists["OUT-B"] = (player_traces["OUT-B_y"] - ball_traces["ball_y"]).abs()
-        ball_dists["OUT-T"] = (player_traces["OUT-T_y"] - ball_traces["ball_y"]).abs()
+        ball_dists["OUT-L"] = (traces["OUT-L_x"] - traces["pred_ball_x"]).abs()
+        ball_dists["OUT-R"] = (traces["OUT-R_x"] - traces["pred_ball_x"]).abs()
+        ball_dists["OUT-B"] = (traces["OUT-B_y"] - traces["pred_ball_y"]).abs()
+        ball_dists["OUT-T"] = (traces["OUT-T_y"] - traces["pred_ball_y"]).abs()
 
         return ball_dists
 
@@ -94,11 +90,11 @@ class Postprocessor:
     @staticmethod
     def detect_carries_by_accel(
         traces: pd.DataFrame,
-        pred_traces: pd.DataFrame,
+        ball_features: pd.DataFrame,
         players: list,
         max_accel=5,
     ) -> tuple[pd.Series, pd.DataFrame]:
-        accels = pred_traces[["accel"]].copy()
+        accels = ball_features[["accel"]].copy()
         for k in np.arange(2) + 1:
             accels[f"prev{k}"] = accels["accel"].shift(k, fill_value=0)
             accels[f"next{k}"] = accels["accel"].shift(-k, fill_value=0)
@@ -144,11 +140,11 @@ class Postprocessor:
                     max_group.append(max_idxs.pop(0))
             max_idxs_grouped.append(max_group)
 
-        ball_dists = Postprocessor.calc_ball_dists(traces, pred_traces, players)
+        ball_dists = Postprocessor.calc_ball_dists(traces, players)
 
         for i in range(len(max_idxs_grouped)):
-            start_idx = pred_traces.loc[min_idxs_grouped[i], "accel"].idxmin()
-            end_idx = pred_traces.loc[max_idxs_grouped[i], "accel"].idxmax()
+            start_idx = ball_features.loc[min_idxs_grouped[i], "accel"].idxmin()
+            end_idx = ball_features.loc[max_idxs_grouped[i], "accel"].idxmax()
             carry_record = [start_idx, end_idx]
 
             if i == 0 or ball_dists.loc[start_idx:end_idx].min().min() < 4:
@@ -164,15 +160,14 @@ class Postprocessor:
     @staticmethod
     def detect_carries_by_poss_score(
         traces: pd.DataFrame,
-        pred_poss: pd.DataFrame,
-        pred_traces: pd.DataFrame,
+        poss_probs: pd.DataFrame,
         players: list,
         thres_touch=0.2,
         thres_carry=0.5,
     ) -> pd.DataFrame:
-        ball_dists = Postprocessor.calc_ball_dists(traces, pred_traces, players)
+        ball_dists = Postprocessor.calc_ball_dists(traces, players)
 
-        poss_scores = pred_poss[players] / np.sqrt(ball_dists + 1e-6)
+        poss_scores = poss_probs[players] / np.sqrt(ball_dists + 1e-6)
         for p in players:
             poss_scores[p] = signal.savgol_filter(poss_scores[p], window_length=11, polyorder=2)
 
@@ -192,13 +187,9 @@ class Postprocessor:
         return carry_records, poss_scores
 
     @staticmethod
-    def finetune_ball_trace(
-        player_traces: pd.DataFrame,
-        ball_trace: pd.DataFrame,
-        carry_records: pd.DataFrame = None,
-    ) -> pd.DataFrame:
+    def finetune_ball_trace(traces: pd.DataFrame, carry_records: pd.DataFrame = None) -> pd.DataFrame:
         output_cols = ["carrier", "ball_x", "ball_y", "focus_x", "focus_y"]
-        output = pd.DataFrame(index=player_traces.index, columns=output_cols)
+        output = pd.DataFrame(index=traces.index, columns=output_cols)
         output[output_cols[1:]] = output[output_cols[1:]].astype(float)
 
         # Reconstruct the ball trace
@@ -209,14 +200,14 @@ class Postprocessor:
 
             output.loc[start_idx:end_idx, "carrier"] = carrier
             if not carrier.startswith("OUT"):
-                output.loc[start_idx:end_idx, "ball_x"] = player_traces.loc[start_idx:end_idx, f"{carrier}_x"]
-                output.loc[start_idx:end_idx, "ball_y"] = player_traces.loc[start_idx:end_idx, f"{carrier}_y"]
+                output.loc[start_idx:end_idx, "ball_x"] = traces.loc[start_idx:end_idx, f"{carrier}_x"]
+                output.loc[start_idx:end_idx, "ball_y"] = traces.loc[start_idx:end_idx, f"{carrier}_y"]
             elif carrier in ["OUT-L", "OUT-R"]:
-                output.loc[start_idx:end_idx, "ball_x"] = player_traces[f"{carrier}_x"].iloc[0]
-                output.loc[start_idx:end_idx, "ball_y"] = ball_trace.loc[start_idx:end_idx, "ball_y"].mean()
+                output.loc[start_idx:end_idx, "ball_x"] = traces[f"{carrier}_x"].iloc[0]
+                output.loc[start_idx:end_idx, "ball_y"] = traces.loc[start_idx:end_idx, "pred_ball_y"].mean()
             else:  # carrier in ["OUT-B", "OUT-T"]
-                output.loc[start_idx:end_idx, "ball_x"] = ball_trace.loc[start_idx:end_idx, "ball_x"].mean()
-                output.loc[start_idx:end_idx, "ball_y"] = player_traces[f"{carrier}_y"].iloc[0]
+                output.loc[start_idx:end_idx, "ball_x"] = traces.loc[start_idx:end_idx, "pred_ball_x"].mean()
+                output.loc[start_idx:end_idx, "ball_y"] = traces[f"{carrier}_y"].iloc[0]
 
         output[["ball_x", "ball_y"]] = output[["ball_x", "ball_y"]].interpolate(limit_direction="both")
 
@@ -253,10 +244,10 @@ class Postprocessor:
                     start_idx += min(5, carry_records.at[i, "trans_dur"] - 1)
 
                 carrier = carry_records.at[i, "carrier"]
-                output.at[start_idx, "focus_x"] = player_traces.at[start_idx, f"{carrier}_x"]
-                output.at[start_idx, "focus_y"] = player_traces.at[start_idx, f"{carrier}_y"]
-                output.at[end_idx, "focus_x"] = player_traces.at[end_idx, f"{carrier}_x"]
-                output.at[end_idx, "focus_y"] = player_traces.at[end_idx, f"{carrier}_y"]
+                output.at[start_idx, "focus_x"] = traces.at[start_idx, f"{carrier}_x"]
+                output.at[start_idx, "focus_y"] = traces.at[start_idx, f"{carrier}_y"]
+                output.at[end_idx, "focus_x"] = traces.at[end_idx, f"{carrier}_x"]
+                output.at[end_idx, "focus_y"] = traces.at[end_idx, f"{carrier}_y"]
 
         output[["focus_x", "focus_y"]] = output[["focus_x", "focus_y"]].interpolate(limit_direction="both")
         output["focus_x"] = output["focus_x"].clip(0, 108)
@@ -274,24 +265,21 @@ class Postprocessor:
 
         for phase in tqdm(self.traces["phase"].unique()):
             phase_traces = self.traces[self.traces["phase"] == phase].copy()
-            phase_pred_poss = self.pred_poss.loc[phase_traces.index]
-            phase_pred_traces = self.pred_traces.loc[phase_traces.index]
+            phase_poss_probs = self.poss_probs.loc[phase_traces.index]
 
-            players = phase_pred_poss.dropna(axis=1).columns
+            players = phase_poss_probs.dropna(axis=1).columns
             for p in players:
-                phase_pred_poss[p] = signal.savgol_filter(phase_pred_poss[p], window_length=11, polyorder=2)
-            self.pred_poss.loc[phase_traces.index] = phase_pred_poss
+                phase_poss_probs[p] = signal.savgol_filter(phase_poss_probs[p], window_length=11, polyorder=2)
+            self.poss_probs.loc[phase_traces.index] = phase_poss_probs
 
             if method == "ball_accel":
                 episodes = [e for e in phase_traces["episode"].unique() if e > 0]
 
-                for episode in tqdm(episodes, desc=f"Phase {phase}"):
+                for episode in episodes:
                     ep_traces = self.traces[self.traces["episode"] == episode].copy()
-                    ep_pred_traces = phase_pred_traces.loc[ep_traces.index]
-
-                    ep_pred_traces = Postprocessor.calc_ball_features(ep_pred_traces)
-                    carry_records = Postprocessor.detect_carries_by_accel(ep_traces, ep_pred_traces, players, max_accel)
-                    ep_output = Postprocessor.finetune_ball_trace(ep_traces, ep_pred_traces, carry_records)
+                    ball_features = Postprocessor.calc_ball_features(ep_traces)
+                    carry_records = Postprocessor.detect_carries_by_accel(ep_traces, ball_features, players, max_accel)
+                    ep_output = Postprocessor.finetune_ball_trace(ep_traces, carry_records)
 
                     carry_records["phase"] = phase
                     carry_records_list.append(carry_records)
@@ -304,9 +292,8 @@ class Postprocessor:
                         ep_output_poss = ep_output["carrier"].fillna(method="bfill").fillna(method="ffill")
                         correct_player_poss += (ep_target_poss == ep_output_poss).astype(int).sum()
 
-                        ep_target_traces = self.target_traces.loc[ep_traces.index]
-                        error_x = (ep_output["ball_x"] - ep_target_traces["ball_x"]).values
-                        error_y = (ep_output["ball_y"] - ep_target_traces["ball_y"]).values
+                        error_x = (ep_output["ball_x"] - ep_traces["ball_x"]).values
+                        error_y = (ep_output["ball_y"] - ep_traces["ball_y"]).values
                         sum_pos_error += np.sqrt((error_x**2 + error_y**2).astype(float)).sum()
 
                 self.output.loc[phase_traces.index, ["ball_x", "ball_y", "focus_x", "focus_y"]] = self.output.loc[
@@ -315,9 +302,9 @@ class Postprocessor:
 
             elif method == "poss_score":
                 carry_records, poss_scores = Postprocessor.detect_carries_by_poss_score(
-                    phase_traces, phase_pred_poss, phase_pred_traces, players, thres_touch, thres_carry
+                    phase_traces, phase_poss_probs, players, thres_touch, thres_carry
                 )
-                phase_output = Postprocessor.finetune_ball_trace(phase_traces, phase_pred_traces, carry_records)
+                phase_output = Postprocessor.finetune_ball_trace(phase_traces, carry_records)
 
                 carry_records["phase"] = phase
                 carry_records_list.append(carry_records)
@@ -339,9 +326,8 @@ class Postprocessor:
                         self.output.loc[ep_traces.index, "player_poss"] = ep_output_poss
                         correct_player_poss += (ep_target_poss == ep_output_poss).astype(int).sum()
 
-                        ep_target_traces = self.target_traces.loc[ep_traces.index]
-                        error_x = (ep_output["ball_x"] - ep_target_traces["ball_x"]).values
-                        error_y = (ep_output["ball_y"] - ep_target_traces["ball_y"]).values
+                        error_x = (ep_output["ball_x"] - ep_traces["ball_x"]).values
+                        error_y = (ep_output["ball_y"] - ep_traces["ball_y"]).values
                         sum_pos_error += np.sqrt((error_x**2 + error_y**2).astype(float)).sum()
 
         self.carry_records = pd.concat(carry_records_list)
@@ -430,7 +416,7 @@ class Postprocessor:
             pp_pred_poss = pp_output["player_poss"].fillna(method="bfill").fillna(method="ffill").map(poss_dict)
 
         fig, axes = plt.subplots(3, 1)
-        fig.subplots_adjust(left=0.1, bottom=0.05, right=0.95, top=0.98, wspace=0, hspace=0.05)
+        fig.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=0.95, wspace=0, hspace=0.05)
         fig.set_size_inches(15, 20)
         plt.rcParams.update({"font.size": 15})
 
