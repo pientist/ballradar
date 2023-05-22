@@ -74,12 +74,17 @@ class TraceHelper:
         self.traces.loc[x.index, TraceHelper.player_to_cols(p)[2:]] = np.stack([vx, vy, speeds, accels]).round(6).T
 
     def calc_running_features(self, remove_outliers=True, smoothing=True):
+        data_cols = self.team1_cols + self.team2_cols
+        new_cols = [c for c in data_cols if c not in self.traces.columns]
+        self.traces = pd.concat([self.traces, pd.DataFrame(index=self.traces.index, columns=new_cols)], axis=1)
+
         for p in tqdm(self.team1_players + self.team2_players, desc="Calculating running features"):
             self.calc_single_player_running_features(p, remove_outliers, smoothing)
 
-        data_cols = self.team1_cols + self.team2_cols
         if "ball_x" in self.traces.columns:
             data_cols += ["ball_x", "ball_y"]
+        self.traces[data_cols] = self.traces[data_cols].astype(float)
+
         meta_cols = self.traces.columns[: len(self.traces.columns) - len(data_cols)].tolist()
         self.traces = self.traces[meta_cols + data_cols]
 
@@ -247,14 +252,15 @@ class TraceHelper:
                     continue
 
             phase_traces = self.traces[self.traces["phase"] == phase]
+            phase_player_cols = phase_traces[player_cols].dropna(axis=1, how="all").columns
             phase_gks = SoccerDataset.detect_goalkeepers(phase_traces)
             team1_code, team2_code = phase_gks[0][0], phase_gks[1][0]
 
             if target_type == "gk":
-                input_cols = [c for c in phase_traces[player_cols].dropna(axis=1).columns if c[:3] not in phase_gks]
+                input_cols = [c for c in phase_player_cols if c[:3] not in phase_gks]
                 output_cols = np.array([[f"{p}_x", f"{p}_y"] for p in phase_gks]).flatten().tolist()
             else:
-                input_cols = [c for c in phase_traces[player_cols].dropna(axis=1).columns]
+                input_cols = phase_player_cols
                 if target_type == "ball":
                     output_cols = ["ball_x", "ball_y"]
 
@@ -284,6 +290,9 @@ class TraceHelper:
             episodes = [e for e in phase_traces["episode"].unique() if e > 0]
             for episode in tqdm(episodes, desc=f"Phase {phase}"):
                 episode_traces = phase_traces[phase_traces["episode"] == episode]
+                if episode_traces[input_cols].isna().any().any():
+                    continue
+
                 episode_input = torch.FloatTensor(episode_traces[input_cols].values)
 
                 macro_target = None
