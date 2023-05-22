@@ -1,9 +1,38 @@
+import math
+
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.nn import (
+    TransformerDecoder,
+    TransformerDecoderLayer,
+    TransformerEncoder,
+    TransformerEncoderLayer,
+)
 
 from models.utils import get_params_str, parse_model_params
 from set_transformer.model import SetTransformer
+
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout=0.1, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        if d_model % 2 != 0:
+            pe[:, 1::2] = torch.cos(position * div_term)[:, 0:-1]
+        else:
+            pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer("pe", pe)
+
+    def forward(self, x):
+        x = x + self.pe[: x.size(0), :]
+        return self.dropout(x)
 
 
 class PlayerBall(nn.Module):
@@ -15,6 +44,7 @@ class PlayerBall(nn.Module):
             "macro_ppe",
             "macro_fpe",
             "macro_fpi",
+            "transformer",
             "macro_pe_dim",
             "macro_pi_dim",
             "macro_rnn_dim",
@@ -59,17 +89,25 @@ class PlayerBall(nn.Module):
                 self.fpi_st = SetTransformer(n_features + 1, macro_pi_dim, embed_type="i")
                 macro_rnn_input_dim += macro_pi_dim
 
-            self.macro_rnn = nn.LSTM(
-                input_size=macro_rnn_input_dim,
-                hidden_size=macro_rnn_dim,
-                num_layers=n_layers,
-                dropout=dropout,
-                bidirectional=params["bidirectional"],
-            )
-            macro_fc_input_dim = macro_rnn_dim * 2 if params["bidirectional"] else macro_rnn_dim
-            self.macro_fc = nn.Sequential(nn.Linear(macro_fc_input_dim, 2), nn.GLU())
+            if params["transformer"]:
+                self.macro_trans_fc = nn.Sequential(nn.Linear(macro_rnn_input_dim, macro_rnn_dim * 2), nn.ReLU())
+                self.pos_encoder = PositionalEncoding(macro_rnn_dim * 2, dropout)
+                encoder_layers = TransformerEncoderLayer(macro_rnn_dim * 2, 4, macro_rnn_dim * 4, dropout)
+                self.macro_trans_encoder = TransformerEncoder(encoder_layers, 2)
+            else:
+                self.macro_rnn = nn.LSTM(
+                    input_size=macro_rnn_input_dim,
+                    hidden_size=macro_rnn_dim,
+                    num_layers=n_layers,
+                    dropout=dropout,
+                    bidirectional=params["bidirectional"],
+                )
+
+            macro_fc_dim = macro_rnn_dim * 2 if params["bidirectional"] or params["transformer"] else macro_rnn_dim
+            self.macro_fc = nn.Sequential(nn.Linear(macro_fc_dim, 2), nn.GLU())
 
         else:
+            assert not params["transformer"]
             self.macro_rnn = nn.LSTM(
                 input_size=(n_features + 1) * self.macro_dim,
                 hidden_size=macro_rnn_dim,
@@ -77,8 +115,8 @@ class PlayerBall(nn.Module):
                 dropout=dropout,
                 bidirectional=params["bidirectional"],
             )
-            macro_fc_input_dim = macro_rnn_dim * 2 if params["bidirectional"] else macro_rnn_dim
-            self.macro_fc = nn.Sequential(nn.Linear(macro_fc_input_dim, self.macro_dim * 2), nn.GLU())
+            macro_fc_dim = macro_rnn_dim * 2 if params["bidirectional"] else macro_rnn_dim
+            self.macro_fc = nn.Sequential(nn.Linear(macro_fc_dim, self.macro_dim * 2), nn.GLU())
 
         self.micro_team1_st = SetTransformer(n_features + macro_rnn_dim * 2 + 1, micro_pi_dim, embed_type="i")
         self.micro_team2_st = SetTransformer(n_features + macro_rnn_dim * 2 + 1, micro_pi_dim, embed_type="i")
@@ -87,15 +125,21 @@ class PlayerBall(nn.Module):
         )
         self.micro_embed_fc = nn.Sequential(nn.Linear(micro_pi_dim * 3, micro_pi_dim), nn.ReLU())
 
-        self.micro_rnn = nn.LSTM(
-            input_size=micro_pi_dim + self.micro_dim,
-            hidden_size=micro_rnn_dim,
-            num_layers=n_layers,
-            dropout=dropout,
-            bidirectional=params["bidirectional"],
-        )
-        micro_fc_input_dim = micro_rnn_dim * 2 if params["bidirectional"] else micro_rnn_dim
-        self.micro_fc = nn.Sequential(nn.Linear(micro_fc_input_dim, self.micro_dim * 2), nn.GLU())
+        if params["transformer"]:
+            self.micro_trans_fc = nn.Sequential(nn.Linear(micro_pi_dim + self.micro_dim, micro_rnn_dim * 2), nn.ReLU())
+            encoder_layers = TransformerEncoderLayer(micro_rnn_dim * 2, 4, micro_rnn_dim * 4, dropout)
+            self.micro_trans_encoder = TransformerEncoder(encoder_layers, 2)
+        else:
+            self.micro_rnn = nn.LSTM(
+                input_size=micro_pi_dim + self.micro_dim,
+                hidden_size=micro_rnn_dim,
+                num_layers=n_layers,
+                dropout=dropout,
+                bidirectional=params["bidirectional"],
+            )
+
+        micro_fc_dim = micro_rnn_dim * 2 if params["bidirectional"] or params["transformer"] else micro_rnn_dim
+        self.micro_fc = nn.Sequential(nn.Linear(micro_fc_dim, self.micro_dim * 2), nn.GLU())
 
     def forward(
         self,
@@ -166,7 +210,12 @@ class PlayerBall(nn.Module):
                 macro_rnn_input = torch.cat([macro_rnn_input, fpi_z], -1)
 
             macro_rnn_input = macro_rnn_input.reshape(seq_len, batch_size * self.macro_dim, -1)
-            macro_h, _ = self.macro_rnn(macro_rnn_input)  # [time, bs * macro_out, macro_rnn * 2]
+            if self.params["transformer"]:
+                macro_trans_input = self.macro_trans_fc(macro_rnn_input)
+                macro_h = self.macro_trans_encoder(macro_trans_input)
+            else:
+                macro_h, _ = self.macro_rnn(macro_rnn_input)  # [time, bs * macro_out, macro_rnn * 2]
+
             macro_h = macro_h.reshape(seq_len * batch_size, self.macro_dim, -1)
             macro_out = self.macro_fc(macro_h)  # [time * bs, macro_out, 1]
 
@@ -192,9 +241,14 @@ class PlayerBall(nn.Module):
         micro_z = self.micro_embed_fc(micro_z).reshape(seq_len, batch_size, -1)  # [time, bs, micro_z]
 
         micro_rnn_input = torch.cat([micro_z, masked_micro_target], -1)  # [time, bs, micro_z + micro_out]
-        micro_h, _ = self.micro_rnn(micro_rnn_input)  # [time, bs, micro_rnn * 2]
-        micro_out = self.micro_fc(micro_h).transpose(0, 1)  # [bs, time, micro_out]
+        if self.params["transformer"]:
+            micro_trans_input = self.micro_trans_fc(micro_rnn_input)
+            micro_h = self.micro_trans_encoder(micro_trans_input)
+        else:
+            micro_h, _ = self.micro_rnn(micro_rnn_input)  # [time, bs, micro_rnn * 2]
 
         macro_out = macro_out.squeeze(-1).reshape(seq_len, batch_size, -1).transpose(0, 1)  # [bs, time, macro_out]
+        micro_out = self.micro_fc(micro_h).transpose(0, 1)  # [bs, time, micro_out]
+
         ps = torch.tensor([108, 72]).to(input.device)
         return torch.cat([macro_out, micro_out * ps], -1)  # [bs, time, macro_out + micro_out]

@@ -361,7 +361,11 @@ if __name__ == "__main__":
         if args.valid_metrica:
             valid_paths += metrica_paths[-1:]
 
-    macro_type = args.macro_type if args.model in ["team_ball", "player_ball"] else None
+    if args.model.startswith("team_ball") or args.model.startswith("player_ball"):
+        macro_type = args.macro_type
+    else:
+        macro_type = None
+
     nw = len(model.device_ids) * 4
     train_dataset = SoccerDataset(
         data_paths=train_paths,
