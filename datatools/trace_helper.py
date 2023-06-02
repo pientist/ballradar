@@ -39,7 +39,7 @@ class TraceHelper:
     def player_to_cols(p):
         return [f"{p}_x", f"{p}_y", f"{p}_vx", f"{p}_vy", f"{p}_speed", f"{p}_accel"]
 
-    def calc_single_player_running_features(self, p: str, remove_outliers=True, smoothing=True):
+    def calc_single_player_running_features(self, p: str, remove_outliers=True, smoothing=True, gk_smoothing=False):
         if remove_outliers:
             MAX_SPEED = 12
             MAX_ACCEL = 8
@@ -50,6 +50,10 @@ class TraceHelper:
 
         x = self.traces[f"{p}_x"].dropna()
         y = self.traces[f"{p}_y"].dropna()
+        if smoothing and gk_smoothing:
+            x = pd.Series(signal.savgol_filter(x, window_length=21, polyorder=P_ORDER))
+            y = pd.Series(signal.savgol_filter(y, window_length=21, polyorder=P_ORDER))
+
         vx = np.diff(x.values, prepend=x.iloc[0]) / 0.1
         vy = np.diff(y.values, prepend=y.iloc[0]) / 0.1
 
@@ -71,7 +75,7 @@ class TraceHelper:
         if smoothing:
             accels = signal.savgol_filter(accels, window_length=W_LEN, polyorder=P_ORDER)
 
-        self.traces.loc[x.index, TraceHelper.player_to_cols(p)[2:]] = np.stack([vx, vy, speeds, accels]).round(6).T
+        self.traces.loc[x.index, TraceHelper.player_to_cols(p)] = np.stack([x, y, vx, vy, speeds, accels]).round(6).T
 
     def calc_running_features(self, remove_outliers=True, smoothing=True):
         data_cols = self.team1_cols + self.team2_cols
