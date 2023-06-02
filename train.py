@@ -58,7 +58,7 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
         loss_dict = {"ce_loss": [], "accuracy": []}
 
     elif model.module.model_type == "regressor":
-        if "rloss_weight" in model.module.params:
+        if "rloss_weight" in model.module.params and model.module.params["rloss_weight"] > 0:
             loss_dict = {"mse_loss": [], "real_loss": [], "pos_error": []}
         else:
             loss_dict = {"mse_loss": [], "pos_error": []}
@@ -108,12 +108,12 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
 
             n_features = model.module.params["n_features"]
             real_loss = calc_real_loss(out[:, :, 0:2], input, n_features)
-            if "rloss_weight" in model.module.params:
+            if "rloss_weight" in model.module.params and model.module.params["rloss_weight"] > 0:
+                loss_dict["real_loss"] += [real_loss.item()]
                 rloss_weight = model.module.params["rloss_weight"]
                 if rloss_weight > 0:
                     loss += real_loss * rloss_weight
 
-            loss_dict["real_loss"] += [real_loss.item()]
             if model.module.target_type == "gk":
                 team1_pos_error = calc_trace_dist(out[:, :, 0:2], target[:, :, 0:2])
                 team2_pos_error = calc_trace_dist(out[:, :, 2:4], target[:, :, 2:4])
@@ -173,14 +173,16 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
                 real_loss = calc_real_loss(micro_out[:, :, 0:2], input, n_features)
 
                 loss = macro_loss + micro_loss
-                if "rloss_weight" in model.module.params:
+                if "rloss_weight" in model.module.params and model.module.params["rloss_weight"] > 0:
                     rloss_weight = model.module.params["rloss_weight"]
                     if rloss_weight > 0:
                         loss += real_loss * rloss_weight
 
                 loss_dict["ce_loss"] += [macro_loss.item()]
                 loss_dict["mse_loss"] += [micro_loss.item()]
-                loss_dict["real_loss"] += [real_loss.item()]
+                if "rloss_weight" in model.module.params and model.module.params["rloss_weight"] > 0:
+                    loss_dict["real_loss"] += [real_loss.item()]
+
                 loss_dict["accuracy"] += [calc_class_acc(macro_out, macro_target)]
                 if model.module.target_type == "gk":
                     team1_pos_error = calc_trace_dist(micro_out[:, :, 0:2], micro_target[:, :, 0:2])

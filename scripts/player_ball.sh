@@ -1,5 +1,5 @@
 python train.py \
---trial 919 \
+--trial 107 \
 --model player_ball \
 --macro_type player_poss \
 --target_type ball \
@@ -7,8 +7,6 @@ python train.py \
 --rloss_weight 1 \
 --masking 0.8 \
 --bidirectional \
---train_fito \
---valid_fito \
 --train_metrica \
 --valid_metrica \
 --flip_pitch \
@@ -22,10 +20,9 @@ python train.py \
 --macro_rnn_dim 256 \
 --micro_pi_dim 128 \
 --micro_rnn_dim 256 \
---dropout 0.2 \
 --n_epochs 50 \
---start_lr 0.0002 \
---min_lr 1e-5 \
+--start_lr 0.0005 \
+--min_lr 1e-6 \
 --batch_size 224 \
 --print_every_batch 50 \
 --save_every_epoch 50 \

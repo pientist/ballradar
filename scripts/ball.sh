@@ -1,8 +1,7 @@
 python train.py \
---trial 401 \
+--trial 250 \
 --model pi_lstm \
 --target_type ball \
---rloss_weight 1 \
 --masking 0.8 \
 --bidirectional \
 --train_fito \
@@ -12,9 +11,9 @@ python train.py \
 --flip_pitch \
 --n_players 11 \
 --n_features 6 \
+--transformer \
 --context_dim 128 \
 --rnn_dim 256 \
---dropout 0.2 \
 --n_epochs 50 \
 --start_lr 0.0005 \
 --min_lr 1e-5 \
