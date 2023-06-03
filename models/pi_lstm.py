@@ -54,7 +54,7 @@ class PILSTM(nn.Module):
         self.team2_st = SetTransformer(in_dim=n_features, out_dim=context_dim)
         self.context_fc = nn.Sequential(nn.Linear(context_dim * 2, context_dim), nn.ReLU())
 
-        if params["transformer"]:
+        if "transformer" in params and params["transformer"]:
             self.trans_fc = nn.Sequential(nn.Linear(context_dim, rnn_dim * 2), nn.ReLU())
             self.pos_encoder = PositionalEncoding(rnn_dim * 2, dropout)
             encoder_layers = TransformerEncoderLayer(rnn_dim * 2, 4, rnn_dim * 4, dropout)
@@ -72,7 +72,7 @@ class PILSTM(nn.Module):
         self.output_fc = nn.Sequential(nn.Linear(output_fc_dim, self.target_dim * 2), nn.GLU())
 
     def forward(self, input: torch.Tensor, target: torch.Tensor = None) -> torch.Tensor:
-        if not self.params["transformer"]:  # for DataParallel employing LSTM
+        if "transformer" not in self.params or not self.params["transformer"]:  # for DataParallel employing LSTM
             self.rnn.flatten_parameters()
 
         input = input.transpose(0, 1)  # [bs, time, -1] to [time, bs, -1]
@@ -90,7 +90,7 @@ class PILSTM(nn.Module):
         team2_z = team2_z.reshape(seq_len, batch_size, -1)  # [time, bs, z]
         z = self.context_fc(torch.cat([team1_z, team2_z], -1))  # [time, bs, z]
 
-        if self.params["transformer"]:
+        if "transformer" in self.params and self.params["transformer"]:
             z = self.trans_fc(z)  # [time, bs, rnn * 2]
             z = self.pos_encoder(z * math.sqrt(self.params["rnn_dim"]) * 2)
             h = self.trans_encoder(z)  # [time, bs, rnn * 2]
