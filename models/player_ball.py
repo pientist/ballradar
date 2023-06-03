@@ -142,7 +142,7 @@ class PlayerBall(nn.Module):
         input: torch.Tensor,
         macro_target: torch.Tensor = None,
         micro_target: torch.Tensor = None,
-        masking_prob: float = 1,  # only used in validation
+        random_mask: torch.Tensor = None,
     ) -> torch.Tensor:
         if not self.params["transformer"]:  # for DataParallel employing LSTMs
             self.macro_rnn.flatten_parameters()
@@ -154,21 +154,13 @@ class PlayerBall(nn.Module):
         n_players = self.params["n_players"]
         n_features = self.params["n_features"]
 
-        # Mask the target trajectories to be used as additional inputs
-        if self.training:
-            if "masking" in self.params and np.random.choice([True, False], p=[0.5, 0.5]):
-                masking_prob = self.params["masking"]
-            else:
-                masking_prob = 1
-        random_mask = (torch.FloatTensor(seq_len, batch_size, 1).uniform_() < 1 - masking_prob).to(input.device)
-
-        if macro_target is not None:
+        if random_mask is not None and macro_target is not None:
             macro_target_onehot = nn.functional.one_hot(macro_target, self.macro_dim).transpose(0, 1)
             masked_macro_target = (macro_target_onehot * random_mask).reshape(seq_len * batch_size, -1).unsqueeze(-1)
         else:
             masked_macro_target = torch.zeros(seq_len * batch_size, self.macro_dim, 1).to(input.device)
 
-        if micro_target is not None:
+        if random_mask is not None and micro_target is not None:
             masked_micro_target = micro_target.transpose(0, 1) * random_mask
         else:
             masked_micro_target = torch.zeros(seq_len, batch_size, self.micro_dim).to(input.device)

@@ -132,10 +132,10 @@ class TraceHelper:
     @staticmethod
     def predict_episode(
         model: nn.Module,
-        input: torch.Tensor,
-        macro_target: torch.Tensor = None,
-        micro_target: torch.Tensor = None,
-        masking_prob=1,
+        input: torch.FloatTensor,
+        macro_target: torch.FloatTensor = None,
+        micro_target: torch.FloatTensor = None,
+        random_mask: torch.BoolTensor = None,
         split=False,
         vary_weights=True,
         wlen=100,
@@ -147,7 +147,8 @@ class TraceHelper:
             if isinstance(model, PlayerBall):
                 macro_target = macro_target.unsqueeze(0).to(device) if macro_target is not None else None
                 micro_target = micro_target.unsqueeze(0).to(device) if micro_target is not None else None
-                return model.forward(input, macro_target, micro_target, masking_prob).squeeze(0).detach().cpu()
+                random_mask = random_mask.to(device) if random_mask is not None else None
+                return model.forward(input, macro_target, micro_target, random_mask).squeeze(0).detach().cpu()
             elif isinstance(model, PIVRNN):
                 return model.sample(input).squeeze(0).detach().cpu()
             else:  # Non-hierarchical LSTM models
@@ -168,7 +169,7 @@ class TraceHelper:
                 elif model.macro_type == "player_poss":
                     output_dim += input.shape[-1] // model.params["n_features"]  # 26 in general
 
-            episode_pred = torch.zeros(input.shape[1], output_dim)
+            pred = torch.zeros(input.shape[1], output_dim)
             weights = torch.linspace(1 / wlen, 1 - 1 / wlen, wlen // 2).unsqueeze(1) if vary_weights else 0.5
 
             for i in range(input.shape[1] // (wlen // 2)):
@@ -179,16 +180,16 @@ class TraceHelper:
                 window_pred = model.forward(input[:, i_from:i_to]).squeeze(0).detach().cpu()
 
                 if i == 0:
-                    episode_pred[i_from:i_half] += window_pred[: (wlen // 2)]
+                    pred[i_from:i_half] += window_pred[: (wlen // 2)]
                 else:
-                    episode_pred[i_from:i_half] += window_pred[: (wlen // 2)] * weights
+                    pred[i_from:i_half] += window_pred[: (wlen // 2)] * weights
 
                 if i == input.shape[1] // (wlen // 2) - 1:
-                    episode_pred[i_half:i_to] += window_pred[(wlen // 2) :]
+                    pred[i_half:i_to] += window_pred[(wlen // 2) :]
                 else:
-                    episode_pred[i_half:i_to] += window_pred[(wlen // 2) :] * (1 - weights)
+                    pred[i_half:i_to] += window_pred[(wlen // 2) :] * (1 - weights)
 
-            return episode_pred
+            return pred
 
     def predict(self, model: nn.Module, masking_prob=1, split=False, evaluate=True):
         target_type = model.target_type
@@ -198,6 +199,12 @@ class TraceHelper:
         n_input_players = 10 if target_type == "gk" else 11
         feature_types = TraceHelper.player_to_cols("")[:n_features]
         player_cols = [f"{p}{t}" for p in self.team1_players + self.team2_players for t in feature_types]
+
+        if macro_type is None:
+            macro_pred_df = None
+        elif macro_type == "team_poss":
+            macro_cols = ["A", "B"]
+            macro_pred_df = pd.DataFrame(index=self.traces.index, columns=macro_cols, dtype=float)
 
         if macro_type == "player_poss" or target_type == "player_poss":
             outside_labels = ["OUT-L", "OUT-R", "OUT-B", "OUT-T"]
@@ -213,7 +220,10 @@ class TraceHelper:
             player_cols = [f"{p}{t}" for p in poss_labels for t in feature_types]
 
             if macro_type == "player_poss":
+                macro_cols = poss_labels
                 macro_pred_df = pd.DataFrame(index=self.traces.index, columns=poss_labels, dtype=float)
+                if masking_prob < 1:
+                    self.traces["masked_poss"] = np.nan
             else:  # micro_type == "player_poss"
                 micro_pred_df = pd.DataFrame(index=self.traces.index, columns=poss_labels, dtype=float)
 
@@ -232,15 +242,12 @@ class TraceHelper:
 
         elif target_type == "ball":
             micro_pred_df = pd.DataFrame(index=self.traces.index, columns=["ball_x", "ball_y"], dtype=float)
+            if masking_prob < 1:
+                self.traces["masked_ball_x"] = np.nan
+                self.traces["masked_ball_y"] = np.nan
 
         elif target_type == "transition":
             micro_pred_df = pd.DataFrame(index=self.traces.index, columns=["transition"], dtype=float)
-
-        if macro_type is None:
-            macro_pred_df = None
-        else:
-            macro_cols = ["A", "B"] if macro_type == "team_poss" else poss_labels
-            macro_pred_df = pd.DataFrame(index=self.traces.index, columns=macro_cols, dtype=float)
 
         n_frames = 0
         if evaluate:
@@ -293,33 +300,40 @@ class TraceHelper:
 
             episodes = [e for e in phase_traces["episode"].unique() if e > 0]
             for episode in tqdm(episodes, desc=f"Phase {phase}"):
-                episode_traces = phase_traces[phase_traces["episode"] == episode]
-                if episode_traces[input_cols].isna().any().any():
+                ep_traces = phase_traces[phase_traces["episode"] == episode]
+                if ep_traces[input_cols].isna().any().any():
                     continue
 
-                episode_input = torch.FloatTensor(episode_traces[input_cols].values)
+                ep_input = torch.FloatTensor(ep_traces[input_cols].values)
+                random_mask = torch.FloatTensor(len(ep_input), 1, 1).uniform_() > masking_prob
 
                 macro_target = None
                 if macro_type == "team_poss":
-                    macro_target = torch.LongTensor((episode_traces["team_poss"] == team2_code).values)
+                    macro_target = torch.LongTensor((ep_traces["team_poss"] == team2_code).values)
                 elif macro_type == "player_poss":
-                    player_poss = episode_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
+                    player_poss = ep_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
                     macro_target = torch.LongTensor(player_poss.map(player_poss_dict).values)
 
                 micro_target = None
                 if target_type == "player_poss":
-                    player_poss = episode_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
+                    player_poss = ep_traces["player_poss"].fillna(method="bfill").fillna(method="ffill")
                     micro_target = torch.LongTensor(player_poss.map(player_poss_dict).values)
                 elif target_type in ["gk", "ball"]:
-                    micro_target = torch.FloatTensor(episode_traces[output_cols].values)
+                    micro_target = torch.FloatTensor(ep_traces[output_cols].values)
+
+                if macro_type == "player_poss" and target_type == "ball" and masking_prob < 1:
+                    random_mask_np = random_mask.numpy()[:, 0, 0]
+                    self.traces.loc[ep_traces.index, "masked_poss"] = player_poss.where(random_mask_np)
+                    self.traces.loc[ep_traces.index, "masked_ball_x"] = ep_traces["ball_x"].where(random_mask_np)
+                    self.traces.loc[ep_traces.index, "masked_ball_y"] = ep_traces["ball_y"].where(random_mask_np)
 
                 with torch.no_grad():
                     try:
                         pred = TraceHelper.predict_episode(
-                            model, episode_input, macro_target, micro_target, masking_prob, split
+                            model, ep_input, macro_target, micro_target, random_mask, split
                         )  # [10:-10]
                     except RuntimeError:
-                        return episode_input, macro_target, micro_target
+                        return ep_input, macro_target, micro_target
 
                 if macro_type is None:
                     micro_pred = pred
@@ -328,18 +342,18 @@ class TraceHelper:
                     micro_pred = pred[:, -2:]
                     macro_pred_probs = nn.Softmax(dim=-1)(macro_pred).numpy()
                     if macro_type == "team_poss":
-                        macro_pred_df.loc[episode_traces.index, team1_code] = macro_pred_probs[:, 0]
-                        macro_pred_df.loc[episode_traces.index, team2_code] = macro_pred_probs[:, 1]
+                        macro_pred_df.loc[ep_traces.index, team1_code] = macro_pred_probs[:, 0]
+                        macro_pred_df.loc[ep_traces.index, team2_code] = macro_pred_probs[:, 1]
                     elif macro_type == "player_poss":
-                        macro_pred_df.loc[episode_traces.index, macro_cols] = macro_pred_probs
+                        macro_pred_df.loc[ep_traces.index, macro_cols] = macro_pred_probs
 
                 if target_type in ["team_poss", "player_poss", "transition"]:
                     micro_pred = nn.Softmax(dim=-1)(micro_pred)
 
                 if target_type == "transition":
-                    micro_pred_df.loc[episode_traces.index, "transition"] = micro_pred[:, 1].numpy()
+                    micro_pred_df.loc[ep_traces.index, "transition"] = micro_pred[:, 1].numpy()
                 else:
-                    micro_pred_df.loc[episode_traces.index, output_cols] = micro_pred.numpy()
+                    micro_pred_df.loc[ep_traces.index, output_cols] = micro_pred.numpy()
 
                 n_frames += micro_pred.shape[0]
                 if evaluate:
@@ -372,7 +386,7 @@ class TraceHelper:
 
                     elif target_type == "ball":
                         sum_pos_error += calc_trace_dist(micro_pred, micro_target, aggfunc="sum")
-                        sum_real_loss += calc_real_loss(micro_pred, episode_input, aggfunc="sum").item()
+                        sum_real_loss += calc_real_loss(micro_pred, ep_input, aggfunc="sum").item()
 
             if macro_type is not None:
                 phase_macro_pred_df = macro_pred_df.loc[phase_traces.index]
@@ -381,10 +395,12 @@ class TraceHelper:
             phase_micro_pred_df = micro_pred_df.loc[phase_traces.index]
             micro_pred_df.loc[phase_traces.index] = phase_micro_pred_df.interpolate(limit_direction="both")
 
-        argmax_idxs = np.argpartition(-macro_pred_df.values, range(3), axis=1)[:, :3]
-        player_poss_top3 = pd.DataFrame(np.array(macro_pred_df.columns)[argmax_idxs])
-        self.traces["pred_poss"] = macro_pred_df.idxmax(axis=1)
-        self.traces["pred_poss_top3"] = player_poss_top3.apply(lambda x: x.tolist(), axis=1)
+        if macro_type is not None:
+            argmax_idxs = np.argpartition(-macro_pred_df.values, range(3), axis=1)[:, :3]
+            player_poss_top3 = pd.DataFrame(np.array(macro_pred_df.columns)[argmax_idxs])
+            self.traces["pred_poss"] = macro_pred_df.idxmax(axis=1)
+            self.traces["pred_poss_top3"] = player_poss_top3.apply(lambda x: x.tolist(), axis=1)
+
         self.traces["pred_ball_x"] = micro_pred_df["ball_x"]
         self.traces["pred_ball_y"] = micro_pred_df["ball_y"]
 

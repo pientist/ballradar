@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from dataset import SoccerDataset
 from models import load_model
+from models.player_ball import PlayerBall
 from models.utils import (
     calc_class_acc,
     calc_real_loss,
@@ -143,7 +144,20 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
             micro_target = data[2].to(default_device)
 
             if train:
-                out = model(input, macro_target, micro_target)
+                if isinstance(model.module, PlayerBall):
+                    # Mask the target trajectories for the model to leverage
+                    if "masking" in model.module.params and np.random.choice([True, False], p=[0.5, 0.5]):
+                        masking_prob = model.module.params["masking"]
+                    else:
+                        masking_prob = 1
+
+                    batch_size = input.size(0)
+                    seq_len = input.size(1)
+                    random_numbers = torch.FloatTensor(seq_len, batch_size, 1).uniform_()
+                    random_mask = (random_numbers > masking_prob).to(default_device)
+
+                out = model(input, macro_target, micro_target, random_mask)
+
             else:
                 with torch.no_grad():
                     out = model(input, macro_target, micro_target)
