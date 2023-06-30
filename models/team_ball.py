@@ -24,8 +24,8 @@ class TeamBall(nn.Module):
         self.n_layers = params["n_layers"]
         dropout = params["dropout"]
 
-        self.macro_out_dim = 2
-        self.micro_out_dim = 4 if self.target_type == "gk" else 2
+        self.macro_dim = 2
+        self.micro_dim = 4 if self.target_type == "gk" else 2
 
         self.team1_set_tf = SetTransformer(self.x_dim, self.z_dim)
         self.team2_set_tf = SetTransformer(self.x_dim, self.z_dim)
@@ -39,14 +39,14 @@ class TeamBall(nn.Module):
 
         if params["prev_out_aware"]:
             self.macro_rnn = nn.LSTM(
-                input_size=self.z_dim + self.macro_out_dim,
+                input_size=self.z_dim + self.macro_dim,
                 hidden_size=self.macro_rnn_dim,
                 num_layers=self.n_layers,
                 dropout=dropout,
                 bidirectional=False,
             )
             self.micro_rnn = nn.LSTM(
-                input_size=self.z_dim + self.macro_out_dim + self.micro_out_dim,
+                input_size=self.z_dim + self.macro_dim + self.micro_dim,
                 hidden_size=self.micro_rnn_dim,
                 num_layers=self.n_layers,
                 dropout=dropout,
@@ -76,7 +76,7 @@ class TeamBall(nn.Module):
                 bidirectional=params["bidirectional"],
             )
             self.micro_rnn = nn.LSTM(
-                input_size=self.z_dim * 2 + self.macro_out_dim,
+                input_size=self.z_dim * 2 + self.macro_dim,
                 hidden_size=self.micro_rnn_dim,
                 num_layers=self.n_layers,
                 dropout=dropout,
@@ -85,8 +85,8 @@ class TeamBall(nn.Module):
 
         macro_fc_input_dim = self.macro_rnn_dim * 2 if params["bidirectional"] else self.macro_rnn_dim
         micro_fc_input_dim = self.micro_rnn_dim * 2 if params["bidirectional"] else self.micro_rnn_dim
-        self.macro_fc = nn.Sequential(nn.Linear(macro_fc_input_dim, self.macro_out_dim * 2), nn.GLU())
-        self.micro_fc = nn.Sequential(nn.Linear(micro_fc_input_dim, self.micro_out_dim * 2), nn.GLU())
+        self.macro_fc = nn.Sequential(nn.Linear(macro_fc_input_dim, self.macro_dim * 2), nn.GLU())
+        self.micro_fc = nn.Sequential(nn.Linear(micro_fc_input_dim, self.micro_dim * 2), nn.GLU())
 
     def forward(
         self,
@@ -143,8 +143,8 @@ class TeamBall(nn.Module):
 
             for t in range(seq_len):
                 if t == 0:
-                    macro_pred_t = torch.zeros(batch_size, self.macro_out_dim).to(input.device)
-                    micro_pred_t = torch.zeros(batch_size, self.micro_out_dim).to(input.device)
+                    macro_pred_t = torch.zeros(batch_size, self.macro_dim).to(input.device)
+                    micro_pred_t = torch.zeros(batch_size, self.micro_dim).to(input.device)
 
                 macro_rnn_input = torch.cat([ppi_z[t], macro_pred_t], dim=-1).unsqueeze(0)
                 _, (macro_h_t, macro_c_t) = self.macro_rnn(macro_rnn_input, (macro_h_t, macro_c_t))

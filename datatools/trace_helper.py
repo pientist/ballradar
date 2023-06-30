@@ -17,7 +17,6 @@ from scipy.ndimage import shift
 from tqdm import tqdm
 
 from dataset import SoccerDataset
-from models import PIVRNN, PlayerBall
 from models.utils import calc_class_acc, calc_real_loss, calc_trace_dist
 
 
@@ -144,12 +143,12 @@ class TraceHelper:
         input = input.unsqueeze(0).to(device)
 
         if not split:
-            if isinstance(model, PlayerBall):
+            if model.params["model"] == "player_ball":
                 macro_target = macro_target.unsqueeze(0).to(device) if macro_target is not None else None
                 micro_target = micro_target.unsqueeze(0).to(device) if micro_target is not None else None
                 random_mask = random_mask.to(device) if random_mask is not None else None
                 return model.forward(input, macro_target, micro_target, random_mask).squeeze(0).detach().cpu()
-            elif isinstance(model, PIVRNN):
+            elif model.params["model"] == "pi_vrnn":
                 return model.sample(input).squeeze(0).detach().cpu()
             else:  # Non-hierarchical LSTM models
                 return model.forward(input).squeeze(0).detach().cpu()
@@ -305,7 +304,7 @@ class TraceHelper:
                     continue
 
                 ep_input = torch.FloatTensor(ep_traces[input_cols].values)
-                random_mask = torch.FloatTensor(len(ep_input), 1, 1).uniform_() > masking_prob
+                random_mask = torch.FloatTensor(1, len(ep_input), 1).uniform_() > masking_prob
 
                 macro_target = None
                 if macro_type == "team_poss":
@@ -322,7 +321,7 @@ class TraceHelper:
                     micro_target = torch.FloatTensor(ep_traces[output_cols].values)
 
                 if macro_type == "player_poss" and target_type == "ball" and masking_prob < 1:
-                    random_mask_np = random_mask.numpy()[:, 0, 0]
+                    random_mask_np = random_mask.numpy()[0, :, 0]
                     self.traces.loc[ep_traces.index, "masked_poss"] = player_poss.where(random_mask_np)
                     self.traces.loc[ep_traces.index, "masked_ball_x"] = ep_traces["ball_x"].where(random_mask_np)
                     self.traces.loc[ep_traces.index, "masked_ball_y"] = ep_traces["ball_y"].where(random_mask_np)

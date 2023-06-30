@@ -143,24 +143,22 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
             macro_target = data[1].to(default_device)
             micro_target = data[2].to(default_device)
 
+            # Mask the target trajectories for the model to leverage
+            if model.module.model_type == "player_ball" and "masking" in model.module.params:
+                if train and np.random.choice([True, False], p=[0.5, 0.5]):
+                    masking_prob = 1
+                else:
+                    masking_prob = model.module.params["masking"]
+                random_numbers = torch.FloatTensor(input.size(1), input.size(0), 1).uniform_()
+                random_mask = (random_numbers > masking_prob).to(default_device)
+            else:
+                random_mask = None
+
             if train:
-                if isinstance(model.module, PlayerBall):
-                    # Mask the target trajectories for the model to leverage
-                    if "masking" in model.module.params and np.random.choice([True, False], p=[0.5, 0.5]):
-                        masking_prob = model.module.params["masking"]
-                    else:
-                        masking_prob = 1
-
-                    batch_size = input.size(0)
-                    seq_len = input.size(1)
-                    random_numbers = torch.FloatTensor(seq_len, batch_size, 1).uniform_()
-                    random_mask = (random_numbers > masking_prob).to(default_device)
-
                 out = model(input, macro_target, micro_target, random_mask)
-
             else:
                 with torch.no_grad():
-                    out = model(input, macro_target, micro_target)
+                    out = model(input, macro_target, micro_target, random_mask)
 
             micro_dim = model.module.micro_dim  # 4 if target_type == "gk" else 2
             macro_out = out[:, :, :-micro_dim].transpose(1, 2)

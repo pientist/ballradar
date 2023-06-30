@@ -154,15 +154,22 @@ class PlayerBall(nn.Module):
         n_players = self.params["n_players"]
         n_features = self.params["n_features"]
 
-        if random_mask is not None and macro_target is not None:
-            macro_target_onehot = nn.functional.one_hot(macro_target, self.macro_dim).transpose(0, 1)
-            masked_macro_target = (macro_target_onehot * random_mask).reshape(seq_len * batch_size, -1).unsqueeze(-1)
+        if random_mask is not None:
+            random_mask = random_mask.transpose(0, 1)
+
+            if macro_target is not None:
+                macro_onehot = nn.functional.one_hot(macro_target, self.macro_dim).transpose(0, 1)
+                masked_macro_target = (macro_onehot * random_mask).reshape(seq_len * batch_size, -1).unsqueeze(-1)
+            else:
+                masked_macro_target = torch.zeros(seq_len * batch_size, self.macro_dim, 1).to(input.device)
+
+            if micro_target is not None:
+                masked_micro_target = micro_target.transpose(0, 1) * random_mask
+            else:
+                masked_micro_target = torch.zeros(seq_len, batch_size, self.micro_dim).to(input.device)
+
         else:
             masked_macro_target = torch.zeros(seq_len * batch_size, self.macro_dim, 1).to(input.device)
-
-        if random_mask is not None and micro_target is not None:
-            masked_micro_target = micro_target.transpose(0, 1) * random_mask
-        else:
             masked_micro_target = torch.zeros(seq_len, batch_size, self.micro_dim).to(input.device)
 
         team1_x = input[:, :, : (n_features * n_players)].reshape(seq_len, batch_size, n_players, -1)
