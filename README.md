@@ -5,9 +5,6 @@
 </div>
 <!-- # Ball Radar -->
 
-Source code for the paper **Ball Trajectory Inference from Multi-Agent Sports Contexts Using Set Transformer and Hierarchical Bi-LSTM** by Kim et al., 2023. (under review)
-
-## Introduction
 **Ball Radar** is a framework for ball trajectory inference from player trajectories in soccer matches. The main model has a hierarchical structure containing the *Ball Possessor Classifier* that predicts which player has the ball at each time step and the *Ball Trajectory Regressor* that predict the final ball trajectory conditioned on the players' possession probabilities. Each of the submodels deploys [Set Transformers](https://arxiv.org/abs/1810.00825) (Lee et al., 2019) to get permutation-invariant or equivariant representations of multi-agent contexts and a Bi-LSTM (or Bi-LSTMs) for sequential inference. Additionally, we perform rule-based postprocessing to make the model output more physically realistic. The following figure is an overview of the framework.<br>
 
 ![overview](img/overview.png)<br>
@@ -51,12 +48,33 @@ For interpretability, we have implemented a tool named `TraceAnimator` for dynam
 
 You can animate an arbitrary slice of Metrica data by importing the class `TraceAnimator` in `datatools/trace_animator.py`, making a class object, and executing the method `run()`. Please refer to `model_eval.ipynb` for the exact usage of this tool.
 
-## Automated Zoom-in on Panoramic Match Videos
+## Citation
+
+If you use this repository in your research, please consider citing the following paper:
+- Hyunsung Kim, Han-Jun Choi, Chang Jo Kim, Jinsung Yoon, and Sang-Ki Ko. **Ball Trajectory Inference from Multi-Agent Sports Contexts Using Set Transformer and Hierarchical Bi-LSTM.** In _Proceedings of the 29th ACM SIGKDD Conference on Knowledge Discovery and Data Mining_, 2023. (accepted, to appear) [ [PDF](https://arxiv.org/abs/2306.08206) ]
+```
+@inproceedings{Kim2023,
+  author       = {Kim, Hyunsung and
+                  Choi, Han-Jun and
+                  Kim, Chang Jo and
+                  Yoon, Jinsung and
+                  Ko, Sang{-}Ki},
+  title        = {Ball Trajectory Inference from Multi-Agent Sports Contexts
+                  Using Set Transformer and Hierarchical {Bi-LSTM}},
+  booktitle    = {The 29th {ACM} {SIGKDD} Conference on Knowledge Discovery and Data Mining},
+  publisher    = {{ACM}},
+  year         = {2023},
+  location     = {Long Beach, CA, USA}
+  isbn         = {979-8-4007-0103-0}
+  url          = {https://doi.org/10.1145/3580305.3599779},
+  doi          = {10.1145/3580305.3599779},
+}
+```
+
+<!-- ## Automated Zoom-in on Panoramic Match Videos
 As mentioned in Section 5.1 of the paper, we prepared a video resulting from recording a K League match by a fixed camera and automatically zooming in on the panoramic video.
 
 ![kleague_cam_zoomin_1](img/kleague_cam_zoomin_1.png)<br>
 ![kleague_cam_zoomin_2](img/kleague_cam_zoomin_2.png)<br>
 
-However, we cannot make the video public because an issue about broadcasting rights between K League arose after submitting the paper. Instead, we attached an animation (`img/gps_18849-18850_00.00-05.00.mp4`) that visualizes a K League match with an additional purple plus marker indicating where to zoom in on the panoramic match video. Note that the locations of the center are different from the predicted ball locations, since they result from additional smoothing and clipping processes for a realistic outcome.
-
-![kleague_anim](img/kleague_anim.png)<br>
+However, we cannot make the video public because an issue about broadcasting rights between K League arose after submitting the paper. Instead, we attached an animation (`img/gps_18849-18850_00.00-05.00.mp4`) that visualizes a K League match with an additional purple plus marker indicating where to zoom in on the panoramic match video. Note that the locations of the center are different from the predicted ball locations, since they result from additional smoothing and clipping processes for a realistic outcome. -->
