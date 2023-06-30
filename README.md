@@ -5,6 +5,9 @@
 </div>
 <!-- # Ball Radar -->
 
+Source code for the paper [Ball Trajectory Inference from Multi-Agent Sports Contexts Using Set Transformer and Hierarchical Bi-LSTM](https://arxiv.org/abs/2306.08206) by Kim et al., KDD 2023.
+
+## Introduction
 **Ball Radar** is a framework for ball trajectory inference from player trajectories in soccer matches. The main model has a hierarchical structure containing the *Ball Possessor Classifier* that predicts which player has the ball at each time step and the *Ball Trajectory Regressor* that predict the final ball trajectory conditioned on the players' possession probabilities. Each of the submodels deploys [Set Transformers](https://arxiv.org/abs/1810.00825) (Lee et al., 2019) to get permutation-invariant or equivariant representations of multi-agent contexts and a Bi-LSTM (or Bi-LSTMs) for sequential inference. Additionally, we perform rule-based postprocessing to make the model output more physically realistic. The following figure is an overview of the framework.<br>
 
 ![overview](img/overview.png)<br>
@@ -49,9 +52,6 @@ For interpretability, we have implemented a tool named `TraceAnimator` for dynam
 You can animate an arbitrary slice of Metrica data by importing the class `TraceAnimator` in `datatools/trace_animator.py`, making a class object, and executing the method `run()`. Please refer to `model_eval.ipynb` for the exact usage of this tool.
 
 ## Citation
-
-If you use this repository in your research, please consider citing the following paper:
-- Hyunsung Kim, Han-Jun Choi, Chang Jo Kim, Jinsung Yoon, and Sang-Ki Ko. **Ball Trajectory Inference from Multi-Agent Sports Contexts Using Set Transformer and Hierarchical Bi-LSTM.** In _Proceedings of the 29th ACM SIGKDD Conference on Knowledge Discovery and Data Mining_, 2023. (accepted, to appear) [ [PDF](https://arxiv.org/abs/2306.08206) ]
 ```
 @inproceedings{Kim2023,
   author       = {Kim, Hyunsung and
