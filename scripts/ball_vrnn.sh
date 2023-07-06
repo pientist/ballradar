@@ -1,5 +1,5 @@
 python train.py \
---trial 306 \
+--trial 300 \
 --model pi_vrnn \
 --target_type ball \
 --kld_weight 100 \

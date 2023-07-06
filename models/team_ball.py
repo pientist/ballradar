@@ -88,12 +88,7 @@ class TeamBall(nn.Module):
         self.macro_fc = nn.Sequential(nn.Linear(macro_fc_input_dim, self.macro_dim * 2), nn.GLU())
         self.micro_fc = nn.Sequential(nn.Linear(micro_fc_input_dim, self.micro_dim * 2), nn.GLU())
 
-    def forward(
-        self,
-        input: torch.Tensor,
-        macro_target: torch.Tensor = None,
-        micro_target: torch.Tensor = None,
-    ) -> torch.Tensor:
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
         self.macro_rnn.flatten_parameters()
         self.micro_rnn.flatten_parameters()
         if self.params["prev_out_aware"] and self.params["bidirectional"]:

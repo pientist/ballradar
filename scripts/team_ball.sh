@@ -1,7 +1,7 @@
 #!/bin/bash
 
 python train.py \
---trial 202 \
+--trial 500 \
 --model team_ball \
 --macro_type team_poss \
 --target_type gk \

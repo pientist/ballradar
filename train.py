@@ -151,14 +151,19 @@ def run_epoch(model: nn.DataParallel, optimizer: torch.optim.Adam, train=False, 
                     masking_prob = model.module.params["masking"]
                 random_numbers = torch.FloatTensor(input.size(1), input.size(0), 1).uniform_()
                 random_mask = (random_numbers > masking_prob).to(default_device)
-            else:
-                random_mask = None
 
-            if train:
-                out = model(input, macro_target, micro_target, random_mask)
-            else:
-                with torch.no_grad():
+                if train:
                     out = model(input, macro_target, micro_target, random_mask)
+                else:
+                    with torch.no_grad():
+                        out = model(input, macro_target, micro_target, random_mask)
+
+            else:
+                if train:
+                    out = model(input)
+                else:
+                    with torch.no_grad():
+                        out = model(input)
 
             micro_dim = model.module.micro_dim  # 4 if target_type == "gk" else 2
             macro_out = out[:, :, :-micro_dim].transpose(1, 2)

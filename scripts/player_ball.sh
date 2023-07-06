@@ -1,5 +1,5 @@
 python train.py \
---trial 107 \
+--trial 110 \
 --model player_ball \
 --macro_type player_poss \
 --target_type ball \
@@ -7,6 +7,8 @@ python train.py \
 --rloss_weight 1 \
 --masking 0.8 \
 --bidirectional \
+--train_fito \
+--valid_fito \
 --train_metrica \
 --valid_metrica \
 --flip_pitch \
